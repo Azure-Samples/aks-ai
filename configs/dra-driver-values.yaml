@@ -1,0 +1,15 @@
+gpuResourcesEnabledOverride: true
+resources:
+  computeDomains:
+    enabled: false
+controller:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.azure.com/mode
+            operator: In
+            values:
+            - system
+nvidiaDriverRoot: "/"
