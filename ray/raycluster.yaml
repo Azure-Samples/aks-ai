@@ -1,0 +1,48 @@
+head:
+  rayVersion: "2.53.0"
+  enableInTreeAutoscaling: false
+  rayStartParams:
+    num-cpus: "0" # Don't schedule tasks on head
+    dashboard-host: "0.0.0.0"
+    disable-usage-stats: "true"
+  # Head uses CPU-only image
+  image:
+    repository: rayproject/ray
+    tag: 2.53.0
+  containerEnv:
+    - name: RAY_DISABLE_DOCKER_CPU_WARNING
+      value: "1"
+    - name: RAY_SCHEDULER_EVENTS
+      value: "0"
+  resources:
+    limits:
+      cpu: "8"
+      memory: "32Gi"
+    requests:
+      cpu: "8"
+      memory: "32Gi"
+  nodeSelector:
+    agentpool: sys
+
+# First worker group (group 1 of 4)
+worker:
+  groupName: workers
+  replicas: 2
+  minReplicas: 2
+  maxReplicas: 4
+  rayStartParams:
+    num-gpus: "4"
+    num-cpus: "64"
+  # Workers use GPU image
+  image:
+    repository: rayproject/ray
+    tag: 2.53.0-gpu
+  resources:
+    limits:
+      cpu: "64"
+      memory: "64Gi"
+      nvidia.com/gpu: "4"
+    requests:
+      cpu: "64"
+      memory: "64Gi"
+      nvidia.com/gpu: "4"

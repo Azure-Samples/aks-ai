@@ -1,0 +1,136 @@
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: llm
+  namespace: ray
+spec:
+  entrypoint: python /home/ray/scripts/entity_recognition.py --skip-inference
+  runtimeEnvYAML: |
+    pip:
+      - pyyaml
+      - xgrammar==0.1.11
+      - pynvml==12.0.0
+      - hf_transfer==0.1.9
+      - tensorboard==2.19.0
+      - "llamafactory@git+https://github.com/hiyouga/LLaMA-Factory.git@ac8c6fdd3ab7fb6372f231f238e6b8ba6a17eb16#egg=llamafactory"
+    env_vars:
+      HF_HUB_ENABLE_HF_TRANSFER: "1"
+
+  shutdownAfterJobFinishes: false   # keep cluster alive to inspect results
+  # ttlSecondsAfterFinished: 3600     # clean up 1 h after completion
+
+  # ── Ray cluster embedded in the job ─────────────────────────
+  rayClusterSpec:
+    rayVersion: "2.53.0"
+    enableInTreeAutoscaling: false
+
+    headGroupSpec:
+      rayStartParams:
+        num-cpus: "0"               # don't schedule training workers on head
+        dashboard-host: "0.0.0.0"
+        disable-usage-stats: "true"
+      template:
+        spec:
+          nodeSelector:
+            agentpool: sys
+          # ---------- init: download viggo dataset ----------
+          initContainers:
+            - name: download-data
+              image: alpine:3.20
+              command: ["sh", "-c"]
+              args:
+                - |
+                  set -e
+                  mkdir -p /mnt/cluster_storage/viggo
+                  wget https://viggo-ds.s3.amazonaws.com/train.jsonl -O /mnt/cluster_storage/viggo/train.jsonl
+                  wget https://viggo-ds.s3.amazonaws.com/val.jsonl -O /mnt/cluster_storage/viggo/val.jsonl
+                  wget https://viggo-ds.s3.amazonaws.com/test.jsonl -O /mnt/cluster_storage/viggo/test.jsonl
+                  wget https://viggo-ds.s3.amazonaws.com/dataset_info.json -O /mnt/cluster_storage/viggo/dataset_info.json
+                  chmod -R 777 /mnt/cluster_storage/viggo
+              volumeMounts:
+                - name: data-vol
+                  mountPath: /mnt/cluster_storage
+          # ---------- head container ----------
+          containers:
+            - name: ray-head
+              image: rayproject/ray:2.53.0
+              env:
+                - name: RAY_DISABLE_DOCKER_CPU_WARNING
+                  value: "1"
+                - name: RAY_SCHEDULER_EVENTS
+                  value: "0"
+              ports:
+                - containerPort: 6379
+                  name: gcs-server
+                - containerPort: 8265
+                  name: dashboard
+                - containerPort: 10001
+                  name: client
+              resources:
+                limits:
+                  cpu: "8"
+                  memory: "32Gi"
+                requests:
+                  cpu: "8"
+                  memory: "32Gi"
+              volumeMounts:
+                - name: scripts
+                  mountPath: /home/ray/scripts
+                - name: data-vol
+                  mountPath: /mnt/cluster_storage
+          volumes:
+            - name: scripts
+              configMap:
+                name: entity-recognition-scripts
+                items:
+                  - key: entity_recognition.py
+                    path: entity_recognition.py
+            - name: data-vol
+              emptyDir: {}
+
+    workerGroupSpecs:
+      - groupName: workers
+        replicas: 2
+        minReplicas: 2
+        maxReplicas: 4
+        rayStartParams:
+          num-gpus: "4"
+          num-cpus: "64"
+        template:
+          spec:
+            # ---------- init: download viggo dataset ----------
+            initContainers:
+              - name: download-data
+                image: alpine:3.20
+                command: ["sh", "-c"]
+                args:
+                  - |
+                    set -e
+                    mkdir -p /mnt/cluster_storage/viggo
+                    wget https://viggo-ds.s3.amazonaws.com/train.jsonl -O /mnt/cluster_storage/viggo/train.jsonl
+                    wget https://viggo-ds.s3.amazonaws.com/val.jsonl -O /mnt/cluster_storage/viggo/val.jsonl
+                    wget https://viggo-ds.s3.amazonaws.com/test.jsonl -O /mnt/cluster_storage/viggo/test.jsonl
+                    wget https://viggo-ds.s3.amazonaws.com/dataset_info.json -O /mnt/cluster_storage/viggo/dataset_info.json
+                    chmod -R 777 /mnt/cluster_storage/viggo
+                volumeMounts:
+                  - name: data-vol
+                    mountPath: /mnt/cluster_storage
+            # ---------- worker container ----------
+            containers:
+              - name: ray-worker
+                image: rayproject/ray:2.53.0-gpu
+                resources:
+                  limits:
+                    cpu: "64"
+                    memory: "64Gi"
+                    nvidia.com/gpu: "4"
+                  requests:
+                    cpu: "64"
+                    memory: "64Gi"
+                    nvidia.com/gpu: "4"
+                volumeMounts:
+                  - name: data-vol
+                    mountPath: /mnt/cluster_storage
+            volumes:
+              - name: data-vol
+                emptyDir: {}

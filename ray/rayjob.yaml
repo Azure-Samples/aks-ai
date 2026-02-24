@@ -1,0 +1,87 @@
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: llm-rayjob
+  namespace: ray
+spec:
+  # Job configuration
+  entrypoint: python /home/ray/scripts/llm_job.py
+  runtimeEnvYAML: |
+    pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu130
+      - xgrammar==0.1.11
+      - pynvml==12.0.0
+      - hf_transfer==0.1.9
+      - tensorboard==2.19.0
+      - llamafactory@git+https://github.com/hiyouga/LLaMA-Factory.git@ac8c6fdd3ab7fb6372f231f238e6b8ba6a17eb16#egg=llamafactory"
+
+  shutdownAfterJobFinishes: true
+  ttlSecondsAfterFinished: 600 # Delete RayJob 10 min after completion
+
+  rayClusterSpec:
+    rayVersion: "2.53.0"
+    enableInTreeAutoscaling: false # Disable Ray autoscaler - use fixed replicas
+    headGroupSpec:
+      rayStartParams:
+        num-cpus: "0" # Don't schedule tasks on head
+        dashboard-host: "0.0.0.0"
+        disable-usage-stats: "true"
+      template:
+        spec:
+          nodeSelector:
+            agentpool: sys
+          containers:
+            - name: ray-head
+              image: rayproject/ray:2.53.0
+              env:
+                - name: RAY_DISABLE_DOCKER_CPU_WARNING
+                  value: "1"
+                - name: RAY_SCHEDULER_EVENTS
+                  value: "0"
+              ports:
+                - containerPort: 6379
+                  name: gcs-server
+                - containerPort: 8265
+                  name: dashboard
+                - containerPort: 10001
+                  name: client
+              resources:
+                limits:
+                  cpu: "8"
+                  memory: "32Gi"
+                requests:
+                  cpu: "8"
+                  memory: "32Gi"
+              volumeMounts:
+                - name: llm-job-sample
+                  mountPath: /home/ray/scripts
+          volumes:
+            - name: llm-job-sample
+              configMap:
+                name: llm-job-sample
+                items:
+                  - key: llm_job.py
+                    path: llm_job.py
+
+    workerGroupSpecs:
+      - groupName: workers
+        replicas: 2
+        minReplicas: 2
+        maxReplicas: 4
+        rayStartParams:
+          num-gpus: "4"
+          num-cpus: "64"
+        template:
+          spec:
+            containers:
+              - name: ray-worker
+                image: rayproject/ray:2.53.0-gpu
+                resources:
+                  limits:
+                    cpu: "64"
+                    memory: "64Gi"
+                    nvidia.com/gpu: "4"
+                  requests:
+                    cpu: "64"
+                    memory: "64Gi"
+                    nvidia.com/gpu: "4"
