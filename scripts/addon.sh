@@ -4,7 +4,7 @@ set -eo pipefail
 
 source scripts/variables.sh
 
-cilium install --version 1.19.1 --set azure.resourceGroup="${RESOURCE_GROUP}"
+# cilium install --version 1.19.1 --set azure.resourceGroup="${RESOURCE_GROUP}"
 
 kubectl label nodes -l agentpool=${USER_POOL_NAME} nvidia.com/gpu.present=true --overwrite
 

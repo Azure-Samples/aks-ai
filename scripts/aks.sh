@@ -24,12 +24,14 @@ else
         --kubernetes-version 1.34.2 \
         --disable-disk-driver \
         --disable-file-driver \
+        --enable-blob-driver \
         --enable-aad \
         --aad-admin-group-object-ids "$MY_USER_ID" \
         --nodepool-name ${SYSTEM_POOL_NAME} \
         --node-vm-size ${SYSTEM_VM_SIZE} \
         --node-count ${SYSTEM_POOL_SIZE} \
-        --network-plugin none
+        --network-plugin azure
+        # --network-plugin none
 fi
 
 
