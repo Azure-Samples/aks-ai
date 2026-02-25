@@ -8,6 +8,7 @@ source scripts/variables.sh
 
 kubectl label nodes -l agentpool=${USER_POOL_NAME} nvidia.com/gpu.present=true --overwrite
 
+helm repo add nvdp https://nvidia.github.io/k8s-device-plugin
 helm upgrade --install nvdp nvdp/nvidia-device-plugin \
     --version=0.18.2 \
     --create-namespace \
@@ -15,6 +16,7 @@ helm upgrade --install nvdp nvdp/nvidia-device-plugin \
     -f configs/device-plugin-values.yaml \
     --wait
 
+helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
 helm upgrade --install dra-driver nvidia/nvidia-dra-driver-gpu \
     --version=25.12.0 \
     --create-namespace \

@@ -12,7 +12,7 @@ spec:
       - hf_transfer==0.1.9
       - tensorboard==2.19.0
       - "llamafactory@git+https://github.com/hiyouga/LLaMA-Factory.git@ac8c6fdd3ab7fb6372f231f238e6b8ba6a17eb16#egg=llamafactory"
-      - pyyaml
+      - IPython
     env_vars:
       HF_HUB_ENABLE_HF_TRANSFER: "1"
 
@@ -31,25 +31,7 @@ spec:
       template:
         spec:
           nodeSelector:
-            agentpool: sys
-          # ---------- init: download viggo dataset ----------
-          initContainers:
-            - name: download-data
-              image: alpine:3.20
-              command: ["sh", "-c"]
-              args:
-                - |
-                  set -e
-                  mkdir -p /mnt/cluster_storage/viggo
-                  wget https://viggo-ds.s3.amazonaws.com/train.jsonl -O /mnt/cluster_storage/viggo/train.jsonl
-                  wget https://viggo-ds.s3.amazonaws.com/val.jsonl -O /mnt/cluster_storage/viggo/val.jsonl
-                  wget https://viggo-ds.s3.amazonaws.com/test.jsonl -O /mnt/cluster_storage/viggo/test.jsonl
-                  wget https://viggo-ds.s3.amazonaws.com/dataset_info.json -O /mnt/cluster_storage/viggo/dataset_info.json
-                  chmod -R 777 /mnt/cluster_storage/viggo
-              volumeMounts:
-                - name: data-vol
-                  mountPath: /mnt/cluster_storage
-          # ---------- head container ----------
+            agentpool: system
           containers:
             - name: ray-head
               image: rayproject/ray:2.53.0
@@ -75,7 +57,7 @@ spec:
               volumeMounts:
                 - name: scripts
                   mountPath: /home/ray/scripts
-                - name: data-vol
+                - name: cluster-storage
                   mountPath: /mnt/cluster_storage
           volumes:
             - name: scripts
@@ -84,8 +66,9 @@ spec:
                 items:
                   - key: entity_recognition.py
                     path: entity_recognition.py
-            - name: data-vol
-              emptyDir: {}
+            - name: cluster-storage
+              persistentVolumeClaim:
+                claimName: cluster-storage
 
     workerGroupSpecs:
       - groupName: workers
@@ -97,24 +80,7 @@ spec:
           num-cpus: "64"
         template:
           spec:
-            # ---------- init: download viggo dataset ----------
-            initContainers:
-              - name: download-data
-                image: alpine:3.20
-                command: ["sh", "-c"]
-                args:
-                  - |
-                    set -e
-                    mkdir -p /mnt/cluster_storage/viggo
-                    wget https://viggo-ds.s3.amazonaws.com/train.jsonl -O /mnt/cluster_storage/viggo/train.jsonl
-                    wget https://viggo-ds.s3.amazonaws.com/val.jsonl -O /mnt/cluster_storage/viggo/val.jsonl
-                    wget https://viggo-ds.s3.amazonaws.com/test.jsonl -O /mnt/cluster_storage/viggo/test.jsonl
-                    wget https://viggo-ds.s3.amazonaws.com/dataset_info.json -O /mnt/cluster_storage/viggo/dataset_info.json
-                    chmod -R 777 /mnt/cluster_storage/viggo
-                volumeMounts:
-                  - name: data-vol
-                    mountPath: /mnt/cluster_storage
-            # ---------- worker container ----------
+            # No init containers needed — workers see the same shared storage
             containers:
               - name: ray-worker
                 image: rayproject/ray:2.53.0-gpu
@@ -128,8 +94,9 @@ spec:
                     memory: "64Gi"
                     nvidia.com/gpu: "4"
                 volumeMounts:
-                  - name: data-vol
+                  - name: cluster-storage
                     mountPath: /mnt/cluster_storage
             volumes:
-              - name: data-vol
-                emptyDir: {}
+              - name: cluster-storage
+                persistentVolumeClaim:
+                  claimName: cluster-storage

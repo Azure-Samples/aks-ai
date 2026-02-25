@@ -24,7 +24,11 @@ import textwrap
 import urllib.request
 from pathlib import Path
 
+import ray
 import yaml
+from ray.data.llm import build_processor, vLLMEngineProcessorConfig
+from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
+from IPython.display import Code, Image, display
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -45,12 +49,13 @@ def download_data(data_dir: str = DATA_DIR) -> str:
     for fname in DATA_FILES:
         dest = os.path.join(data_dir, fname)
         if not os.path.exists(dest):
-            print(f"  Downloading {fname} ...")
+            print(f"Downloading {fname} ...")
             urllib.request.urlretrieve(f"{DATA_BASE_URL}/{fname}", dest)
         else:
-            print(f"  {fname} already exists, skipping.")
+            print(f"{fname} already exists, skipping.")
 
-    print(f"  Data ready at {data_dir}")
+    print(f"Data ready at {data_dir}")
+    display(Code(filename=os.path.join(data_dir, "dataset_info.json"), language="json"))
     return data_dir
 
 
@@ -116,11 +121,12 @@ def run_training(data_dir: str, num_workers: int = 4) -> str:
         "eval_steps": 500,
     }
 
-    config_path = os.path.join(data_dir, "lora_sft_ray_generated.yaml")
+    config_path = os.path.join(data_dir, "lora_sft_ray.yaml")
     with open(config_path, "w") as f:
         yaml.dump(training_config, f, default_flow_style=False)
 
-    print("  Training config written to", config_path)
+    print("Training config written to", config_path)
+    display(Code(filename=config_path, language="yaml"))
 
     # Launch training via LLaMA-Factory CLI with Ray backend
     env = {**os.environ, "USE_RAY": "1"}
@@ -139,20 +145,26 @@ def run_training(data_dir: str, num_workers: int = 4) -> str:
 
     # Locate the latest LoRA checkpoint
     lora_path = _find_latest_checkpoint(saves_dir)
-    print(f"  LoRA adapter saved at: {lora_path}")
+    print(f"LoRA adapter saved at: {lora_path}")
+    output_path = os.path.join(output_dir, "all_results.json")
+    display(Code(filename=output_path, language="json"))
     return lora_path
 
 
 def _find_latest_checkpoint(saves_dir: str) -> str:
     save_dir = Path(saves_dir) / "lora_sft_ray"
-    trainer_dirs = [
+    # Ray Train v2 (Ray ≥2.53) saves checkpoints as checkpoint_<timestamp> dirs
+    checkpoint_dirs = [
         d for d in save_dir.iterdir()
-        if d.name.startswith("TorchTrainer_") and d.is_dir()
+        if d.name.startswith("checkpoint_") and d.is_dir()
     ]
-    if not trainer_dirs:
-        raise FileNotFoundError(f"No TorchTrainer directories found in {save_dir}")
-    latest = max(trainer_dirs, key=lambda d: d.stat().st_mtime)
-    return str(latest / "checkpoint_000000" / "checkpoint")
+    if not checkpoint_dirs:
+        raise FileNotFoundError(f"No checkpoint directories found in {save_dir}")
+    latest = max(checkpoint_dirs, key=lambda d: d.stat().st_mtime)
+    # The LoRA adapter files (adapter_model.safetensors, etc.) are
+    # inside a "checkpoint" subfolder when persisted by Ray Train v2
+    inner = latest / "checkpoint"
+    return str(inner) if inner.is_dir() else str(latest)
 
 
 # ============================================================
@@ -164,16 +176,13 @@ def distribute_checkpoint_to_workers(lora_path: str) -> None:
     head node after training.  This function copies it to every GPU worker
     through the Ray object store so that vLLM can load it during inference.
     """
-    import ray
-    from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
-
     # Read adapter files into memory (LoRA adapters are small, typically < 100 MB)
     checkpoint_data = {}
     for f in Path(lora_path).iterdir():
         if f.is_file():
             checkpoint_data[f.name] = f.read_bytes()
     total_mb = sum(len(v) for v in checkpoint_data.values()) / 1024 / 1024
-    print(f"  Distributing LoRA checkpoint ({total_mb:.1f} MB, "
+    print(f"Distributing LoRA checkpoint ({total_mb:.1f} MB, "
           f"{len(checkpoint_data)} files) to GPU workers …")
 
     data_ref = ray.put(checkpoint_data)
@@ -204,9 +213,6 @@ def distribute_checkpoint_to_workers(lora_path: str) -> None:
 # ============================================================
 def run_batch_inference(model_source: str, lora_path: str, data_dir: str):
     """Run batch inference with vLLM through ray.data.llm and evaluate."""
-    import ray
-    from ray.data.llm import build_processor, vLLMEngineProcessorConfig
-
     # System prompt from training data
     with open(os.path.join(data_dir, "train.jsonl")) as fp:
         system_content = json.loads(fp.readline())["instruction"]

@@ -39,7 +39,7 @@ if az aks nodepool show --resource-group ${RESOURCE_GROUP} --cluster-name ${CLUS
     echo "User pool already exists."
 else
     echo "User pool does not exist. Creating ..."
-     az aks nodepool add \
+    az aks nodepool add \
         --resource-group ${RESOURCE_GROUP} \
         --cluster-name ${CLUSTER_NAME} \
         --node-vm-size ${USER_VM_SIZE} \
@@ -51,3 +51,27 @@ az aks get-credentials --resource-group ${RESOURCE_GROUP} \
     --name ${CLUSTER_NAME} \
     --admin \
     --overwrite-existing
+
+# if az storage account show --name "$STORAGE_ACCOUNT" --resource-group "$RESOURCE_GROUP" &>/dev/null; then
+#     echo "Storage account $STORAGE_ACCOUNT already exists"
+# else
+#     echo "Storage account $STORAGE_ACCOUNT does not exist. Creating ..."
+#     az storage account create \
+#         --name "$STORAGE_ACCOUNT" \
+#         --resource-group "$RESOURCE_GROUP" \
+#         --location "$PRIMARY_REGION" \
+#         --sku Standard_LRS \
+#         --kind StorageV2 \
+#         --allow-blob-public-access false
+# fi
+
+# if az storage container show --name "$STORAGE_CONTAINER" --account-name "$STORAGE_ACCOUNT" &>/dev/null; then
+#     echo "Storage container $STORAGE_CONTAINER already exists"
+# else
+#     echo "Storage container $STORAGE_CONTAINER does not exist. Creating ..."
+#     az storage container create \
+#         --name "$STORAGE_CONTAINER" \
+#         --account-name "$STORAGE_ACCOUNT" \
+#         --auth-mode login \
+#         --public-access off
+# fi
