@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cluster-storage
+  namespace: ray
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: blob-fuse2-premium
+  resources:
+    requests:
+      storage: 100Gi
