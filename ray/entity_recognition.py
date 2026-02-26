@@ -20,15 +20,13 @@ import json
 import os
 import subprocess
 import sys
-import textwrap
 import urllib.request
 from pathlib import Path
 
 import ray
 import yaml
 from ray.data.llm import build_processor, vLLMEngineProcessorConfig
-from ray.util.scheduling_strategies import NodeAffinitySchedulingStrategy
-from IPython.display import Code, Image, display
+from IPython.display import Code, display
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -55,14 +53,15 @@ def download_data(data_dir: str = DATA_DIR) -> str:
             print(f"{fname} already exists, skipping.")
 
     print(f"Data ready at {data_dir}")
-    display(Code(filename=os.path.join(data_dir, "dataset_info.json"), language="json"))
     return data_dir
 
 
 # ============================================================
 # 2. Distributed Fine-Tuning (Ray Train + LLaMA-Factory)
 # ============================================================
-def run_training(data_dir: str, num_workers: int = 4) -> str:
+def run_training(
+    data_dir: str, num_workers: int = 4, num_gpus_per_worker: int = 4
+) -> str:
     """
     Run LoRA SFT using LLaMA-Factory with Ray Train.
     Returns the path to the saved LoRA adapter checkpoint.
@@ -98,11 +97,11 @@ def run_training(data_dir: str, num_workers: int = 4) -> str:
         "plot_loss": True,
         "overwrite_output_dir": True,
         "save_only_model": False,
-        # ray  — no Anyscale-specific resources
+        # ray
         "ray_run_name": "lora_sft_ray",
         "ray_storage_path": saves_dir,
         "ray_num_workers": num_workers,
-        "resources_per_worker": {"GPU": 1},
+        "resources_per_worker": {"GPU": num_gpus_per_worker},
         "placement_strategy": "PACK",
         # train
         "per_device_train_batch_size": 1,
@@ -122,25 +121,28 @@ def run_training(data_dir: str, num_workers: int = 4) -> str:
     }
 
     config_path = os.path.join(data_dir, "lora_sft_ray.yaml")
-    with open(config_path, "w") as f:
+    with open(config_path, "w", encoding="utf-8") as f:
         yaml.dump(training_config, f, default_flow_style=False)
 
     print("Training config written to", config_path)
     display(Code(filename=config_path, language="yaml"))
 
-    # Launch training via LLaMA-Factory CLI with Ray backend
+    # Launch training via LLaMA-Factory CLI with Ray backend, streaming output
     env = {**os.environ, "USE_RAY": "1"}
-    result = subprocess.run(
+    process = subprocess.Popen(
         ["llamafactory-cli", "train", config_path],
-        env=env, capture_output=True, text=True,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
     )
-    if result.stdout:
-        print(result.stdout)
-    if result.stderr:
-        print(result.stderr, file=sys.stderr)
-    if result.returncode != 0:
+    for line in process.stdout:
+        print(line, end="", flush=True)
+    process.wait()
+    if process.returncode != 0:
         raise RuntimeError(
-            f"llamafactory-cli train failed with exit code {result.returncode}"
+            f"llamafactory-cli train failed with exit code {process.returncode}"
         )
 
     # Locate the latest LoRA checkpoint
@@ -155,8 +157,7 @@ def _find_latest_checkpoint(saves_dir: str) -> str:
     save_dir = Path(saves_dir) / "lora_sft_ray"
     # Ray Train v2 (Ray ≥2.53) saves checkpoints as checkpoint_<timestamp> dirs
     checkpoint_dirs = [
-        d for d in save_dir.iterdir()
-        if d.name.startswith("checkpoint_") and d.is_dir()
+        d for d in save_dir.iterdir() if d.name.startswith("checkpoint_") and d.is_dir()
     ]
     if not checkpoint_dirs:
         raise FileNotFoundError(f"No checkpoint directories found in {save_dir}")
@@ -168,58 +169,20 @@ def _find_latest_checkpoint(saves_dir: str) -> str:
 
 
 # ============================================================
-# 3. Distribute LoRA checkpoint to all GPU workers
+# 3. Batch Inference  (ray.data.llm + vLLM)
 # ============================================================
-def distribute_checkpoint_to_workers(lora_path: str) -> None:
-    """
-    On KubeRay without shared storage, the LoRA checkpoint lives only on the
-    head node after training.  This function copies it to every GPU worker
-    through the Ray object store so that vLLM can load it during inference.
-    """
-    # Read adapter files into memory (LoRA adapters are small, typically < 100 MB)
-    checkpoint_data = {}
-    for f in Path(lora_path).iterdir():
-        if f.is_file():
-            checkpoint_data[f.name] = f.read_bytes()
-    total_mb = sum(len(v) for v in checkpoint_data.values()) / 1024 / 1024
-    print(f"Distributing LoRA checkpoint ({total_mb:.1f} MB, "
-          f"{len(checkpoint_data)} files) to GPU workers …")
-
-    data_ref = ray.put(checkpoint_data)
-
-    @ray.remote(num_cpus=0.1, num_gpus=0)
-    def _write_checkpoint(path: str, data):
-        os.makedirs(path, exist_ok=True)
-        for name, content in data.items():
-            with open(os.path.join(path, name), "wb") as fh:
-                fh.write(content)
-        return True
-
-    # Target every alive GPU node
-    nodes = [n for n in ray.nodes() if n["Alive"] and n.get("Resources", {}).get("GPU", 0) > 0]
-    refs = []
-    for node in nodes:
-        strategy = NodeAffinitySchedulingStrategy(node_id=node["NodeID"], soft=False)
-        refs.append(
-            _write_checkpoint.options(scheduling_strategy=strategy)
-            .remote(lora_path, data_ref)
-        )
-    ray.get(refs)
-    print(f"  Checkpoint distributed to {len(nodes)} GPU node(s).")
-
-
-# ============================================================
-# 4. Batch Inference  (ray.data.llm + vLLM)
-# ============================================================
-def run_batch_inference(model_source: str, lora_path: str, data_dir: str):
+def run_batch_inference(
+    model_source: str, lora_path: str, data_dir: str, num_workers: int = 16
+):
     """Run batch inference with vLLM through ray.data.llm and evaluate."""
     # System prompt from training data
-    with open(os.path.join(data_dir, "train.jsonl")) as fp:
+    with open(os.path.join(data_dir, "train.jsonl"), "r", encoding="utf-8") as fp:
         system_content = json.loads(fp.readline())["instruction"]
 
     config = vLLMEngineProcessorConfig(
         model_source=model_source,
         runtime_env={
+            "pip": ["vllm>=0.8"],
             "env_vars": {
                 "VLLM_USE_V1": "0",  # v1 doesn't support LoRA adapters yet
             },
@@ -235,7 +198,7 @@ def run_batch_inference(model_source: str, lora_path: str, data_dir: str):
             "max_num_batched_tokens": 4096,
             "max_model_len": 4096,
         },
-        concurrency=1,
+        concurrency=num_workers,
         batch_size=16,
     )
 
@@ -257,48 +220,65 @@ def run_batch_inference(model_source: str, lora_path: str, data_dir: str):
     ds = processor(ds)
     results = ds.take_all()
 
+    print("\nSample inference result:")
+    display(Code(json.dumps(results[0], indent=2, default=str), language="json"))
+
     # --- Evaluation (exact match) ---
     matches = sum(1 for r in results if r["output"] == r["generated_output"])
     accuracy = matches / len(results) if results else 0.0
-
-    print(f"\n  Batch Inference Results")
-    print(f"  ─────────────────────────")
-    print(f"  Total samples : {len(results)}")
-    print(f"  Exact matches : {matches}")
-    print(f"  Accuracy      : {accuracy:.4f}")
-    print(f"\n  Sample result:\n{json.dumps(results[0], indent=2, default=str)}")
-    return results, accuracy
+    return results, matches, accuracy
 
 
 # ============================================================
 # Main
 # ============================================================
 def main():
+    """Main function to run the full pipeline."""
+
     parser = argparse.ArgumentParser(
         description="E2E LLM Entity Recognition on AKS with KubeRay"
     )
-    parser.add_argument("--skip-training", action="store_true",
-                        help="Skip training; requires --lora-path or an existing checkpoint")
-    parser.add_argument("--skip-inference", action="store_true",
-                        help="Skip batch inference (training only)")
-    parser.add_argument("--data-dir", default=DATA_DIR,
-                        help="Dataset directory (default: %(default)s)")
-    parser.add_argument("--lora-path", default=None,
-                        help="Path to an existing LoRA adapter (skips training)")
-    parser.add_argument("--num-workers", type=int, default=4,
-                        help="Number of Ray Train GPU workers (default: 4)")
+    parser.add_argument(
+        "--skip-training",
+        action="store_true",
+        help="Skip training; requires --lora-path or an existing checkpoint",
+    )
+    parser.add_argument(
+        "--skip-inference",
+        action="store_true",
+        help="Skip batch inference (training only)",
+    )
+    parser.add_argument(
+        "--data-dir", default=DATA_DIR, help="Dataset directory (default: %(default)s)"
+    )
+    parser.add_argument(
+        "--lora-path",
+        default=None,
+        help="Path to an existing LoRA adapter (skips training)",
+    )
+    parser.add_argument(
+        "--num-workers",
+        type=int,
+        default=4,
+        help="Number of Ray Train GPU workers (default: 4)",
+    )
     args = parser.parse_args()
 
-    # ── Step 1: Data ────────────────────────────────────────────
+    # ── Step 1: Data Ingestion ──────────────────────────────────
     print("=" * 60)
     print("Step 1  Downloading / verifying dataset")
     print("=" * 60)
     data_dir = download_data(args.data_dir)
 
     # Show a sample
-    with open(os.path.join(data_dir, "train.jsonl")) as fp:
+    with open(os.path.join(data_dir, "train.jsonl"), "r", encoding="utf-8") as fp:
         sample = json.loads(fp.readline())
-    print(f"\n  System prompt (first 120 chars):\n  {textwrap.shorten(sample['instruction'], 120)}")
+    print("\nSample training instance:")
+    display(Code(json.dumps(sample, indent=2, ensure_ascii=False), language="json"))
+
+    # Show dataset info
+    print("Dataset info:")
+    display(Code(filename=os.path.join(data_dir, "dataset_info.json"), language="json"))
 
     # ── Step 2: Training ────────────────────────────────────────
     if not args.skip_training:
@@ -312,9 +292,11 @@ def main():
             try:
                 lora_path = _find_latest_checkpoint(os.path.join(data_dir, "saves"))
             except FileNotFoundError:
-                print("ERROR: --lora-path not provided and no existing checkpoint found.")
+                print(
+                    "ERROR: --lora-path not provided and no existing checkpoint found."
+                )
                 sys.exit(1)
-        print(f"  Using existing LoRA adapter: {lora_path}")
+        print(f"Using existing LoRA adapter: {lora_path}")
 
     # ── Step 3: Batch Inference ─────────────────────────────────
     if not args.skip_inference:
@@ -322,10 +304,15 @@ def main():
         print("Step 3  Batch inference (ray.data.llm + vLLM)")
         print("=" * 60)
 
-        # Distribute checkpoint to GPU workers (KubeRay has no shared FS)
-        distribute_checkpoint_to_workers(lora_path)
+        results, matches, accuracy = run_batch_inference(
+            MODEL_SOURCE, lora_path, data_dir
+        )
 
-        results, accuracy = run_batch_inference(MODEL_SOURCE, lora_path, data_dir)
+        print("Batch Inference Results")
+        print("─────────────────────────")
+        print(f"Total samples : {len(results)}")
+        print(f"Exact matches : {matches}")
+        print(f"Accuracy      : {accuracy:.4f}")
 
     # ── Done ────────────────────────────────────────────────────
     print("\n" + "=" * 60)

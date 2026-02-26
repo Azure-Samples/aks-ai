@@ -32,22 +32,28 @@ To query the endpoint once it's running:
 import argparse
 import json
 import os
+import signal
 from pathlib import Path
+
+from ray import serve
+from ray.serve.llm import LLMConfig, build_openai_app
 
 MODEL_SOURCE = "Qwen/Qwen2.5-7B-Instruct"
 MODEL_ID = "ft-model"
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Serve fine-tuned model via Ray Serve LLM")
-    parser.add_argument("--lora-path", required=True,
-                        help="Local path to the LoRA adapter checkpoint directory")
+    parser = argparse.ArgumentParser(
+        description="Serve fine-tuned model via Ray Serve LLM"
+    )
+    parser.add_argument(
+        "--lora-path",
+        required=True,
+        help="Local path to the LoRA adapter checkpoint directory",
+    )
     parser.add_argument("--model-source", default=MODEL_SOURCE)
     parser.add_argument("--model-id", default=MODEL_ID)
     args = parser.parse_args()
-
-    from ray import serve
-    from ray.serve.llm import LLMConfig, build_openai_app
 
     # The dynamic_lora_loading_path is the *parent* of the adapter directory.
     # vLLM will load adapters by name from within that parent directory.
@@ -87,7 +93,6 @@ def main():
 
     # Keep the process alive so that Ray Serve stays up
     print("\n  Serving at http://0.0.0.0:8000/v1  (Ctrl+C to stop)")
-    import signal
     signal.pause()
 
 

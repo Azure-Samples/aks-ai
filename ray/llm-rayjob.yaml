@@ -4,17 +4,19 @@ metadata:
   name: llm
   namespace: ray
 spec:
-  entrypoint: python /home/ray/scripts/entity_recognition.py --skip-inference
+  entrypoint: python /home/ray/scripts/entity_recognition.py --skip-training
   runtimeEnvYAML: |
     pip:
       - xgrammar==0.1.11
       - pynvml==12.0.0
       - hf_transfer==0.1.9
       - tensorboard==2.19.0
-      - "llamafactory@git+https://github.com/hiyouga/LLaMA-Factory.git@ac8c6fdd3ab7fb6372f231f238e6b8ba6a17eb16#egg=llamafactory"
+      - "llamafactory@git+https://github.com/hiyouga/LLaMA-Factory.git@v0.9.3#egg=llamafactory"
       - IPython
     env_vars:
       HF_HUB_ENABLE_HF_TRANSFER: "1"
+      RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO: "0"
+      RAY_OVERRIDE_JOB_RUNTIME_ENV: "1"
 
   shutdownAfterJobFinishes: false   # keep cluster alive to inspect results
   # ttlSecondsAfterFinished: 3600     # clean up 1 h after completion
@@ -76,7 +78,7 @@ spec:
         minReplicas: 2
         maxReplicas: 4
         rayStartParams:
-          num-gpus: "4"
+          num-gpus: "8"
           num-cpus: "64"
         template:
           spec:
@@ -88,11 +90,11 @@ spec:
                   limits:
                     cpu: "64"
                     memory: "64Gi"
-                    nvidia.com/gpu: "4"
+                    nvidia.com/gpu: "8"
                   requests:
                     cpu: "64"
                     memory: "64Gi"
-                    nvidia.com/gpu: "4"
+                    nvidia.com/gpu: "8"
                 volumeMounts:
                   - name: cluster-storage
                     mountPath: /mnt/cluster_storage
