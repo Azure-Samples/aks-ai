@@ -17,7 +17,7 @@ mountOptions:
   - -o entry_timeout=120
   - -o negative_timeout=120
   - --log-level=LOG_WARNING
-  - --cache-size-mb=1000
+  - --cache-size-mb=2000
 
 allowVolumeExpansion: true
 reclaimPolicy: Retain
