@@ -1,6 +1,7 @@
+#!/bin/bash
 # Set up pvc with blobfuse2
-# kubectl apply -f configs/storageclass.yaml
-# kubectl apply -f configs/pvc.yaml
+kubectl apply -f configs/storageclass.yaml
+kubectl apply -f configs/pvc.yaml
 
 ### Entity Recognition E2E  (training + batch inference)
 

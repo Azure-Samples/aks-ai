@@ -182,7 +182,6 @@ def run_batch_inference(
     config = vLLMEngineProcessorConfig(
         model_source=model_source,
         runtime_env={
-            "pip": ["vllm>=0.8"],
             "env_vars": {
                 "VLLM_USE_V1": "0",  # v1 doesn't support LoRA adapters yet
             },

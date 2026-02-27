@@ -13,6 +13,9 @@ spec:
       - tensorboard==2.19.0
       - "llamafactory@git+https://github.com/hiyouga/LLaMA-Factory.git@v0.9.3#egg=llamafactory"
       - IPython
+      - "vllm"
+      - transformers
+      - pandas
     env_vars:
       HF_HUB_ENABLE_HF_TRANSFER: "1"
       RAY_ACCEL_ENV_VAR_OVERRIDE_ON_ZERO: "0"
