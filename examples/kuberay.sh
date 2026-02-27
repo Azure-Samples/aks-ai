@@ -8,12 +8,12 @@ NAMESPACE=ray
 
 # 1. Create the ConfigMap holding the job script
 kubectl create configmap entity-recognition-scripts \
-  --from-file=entity_recognition.py \
+  --from-file=examples/entity_recognition.py \
   -n $NAMESPACE \
   --dry-run=client -o yaml | kubectl apply -f -
 
 # 2. Submit the RayJob (creates its own transient cluster)
-kubectl apply -f llm-rayjob.yaml
+kubectl apply -f examples/llm-rayjob.yaml
 
 # 3. Wait for the job's pod to be running before streaming logs
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/created-by=kuberay-operator -n $NAMESPACE  --timeout=300s
