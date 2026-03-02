@@ -14,24 +14,25 @@ import os
 import ray
 
 import numpy as np
-from PIL import Image
 import torch
-from transformers import CLIPModel, CLIPProcessor
 from doggos.embed import EmbedImages
 
-import json
 import shutil
-import tempfile
-from pathlib import Path
-from urllib.parse import urlparse
 
-import mlflow
-import ray.train
+import json
+from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from sklearn.metrics import multilabel_confusion_matrix
 
+from ray.train.torch import get_device
+
+import tempfile
+import mlflow
+from ray.train.torch import TorchTrainer
+
+from urllib.parse import urlparse
+from sklearn.metrics import multilabel_confusion_matrix
 
 # ---------------------------------------------------------------------------
 # Config
@@ -59,7 +60,7 @@ NUM_WORKERS = 4
 SCALING_CONFIG = ray.train.ScalingConfig(
     num_workers=NUM_WORKERS,
     use_gpu=True,
-    resources_per_worker={"CPU": 8, "GPU": 2},
+    resources_per_worker={"CPU": 8, "GPU": 4},
 )
 
 
@@ -77,11 +78,14 @@ def convert_to_label(row, class_to_label):
     return row
 
 
+# ---------------------------------------------------------------------------
+# Preprocess
+# ---------------------------------------------------------------------------
 class Preprocessor:
     """Preprocessor class."""
 
     def __init__(self, class_to_label=None):
-        self.class_to_label = class_to_label or {}
+        self.class_to_label = class_to_label or {}  # mutable defaults
         self.label_to_class = {v: k for k, v in self.class_to_label.items()}
 
     def fit(self, ds, column):
@@ -119,11 +123,13 @@ class Preprocessor:
 class ClassificationModel(torch.nn.Module):
     def __init__(self, embedding_dim, hidden_dim, dropout_p, num_classes):
         super().__init__()
+        # Hyperparameters
         self.embedding_dim = embedding_dim
         self.hidden_dim = hidden_dim
         self.dropout_p = dropout_p
         self.num_classes = num_classes
 
+        # Define layers
         self.fc1 = nn.Linear(embedding_dim, hidden_dim)
         self.batch_norm = nn.BatchNorm1d(hidden_dim)
         self.relu = nn.ReLU()
@@ -141,12 +147,14 @@ class ClassificationModel(torch.nn.Module):
     @torch.inference_mode()
     def predict(self, batch):
         z = self(batch)
-        return torch.argmax(z, dim=1).cpu().numpy()
+        y_pred = torch.argmax(z, dim=1).cpu().numpy()
+        return y_pred
 
     @torch.inference_mode()
     def predict_probabilities(self, batch):
         z = self(batch)
-        return F.softmax(z, dim=1).cpu().numpy()
+        y_probs = F.softmax(z, dim=1).cpu().numpy()
+        return y_probs
 
     def save(self, dp):
         Path(dp).mkdir(parents=True, exist_ok=True)
@@ -175,39 +183,42 @@ class ClassificationModel(torch.nn.Module):
 # Batching
 # ---------------------------------------------------------------------------
 def collate_fn(batch, device=None):
-    from ray.train.torch import get_device
-
     dtypes = {"embedding": torch.float32, "label": torch.int64}
     tensor_batch = {}
+
+    # If no device is provided, try to get it from Ray Train context
     if device is None:
         try:
             device = get_device()
         except RuntimeError:
+            # When not in Ray Train context, use CPU for testing
             device = "cpu"
-    for key in dtypes:
+
+    for key in dtypes.keys():
         if key in batch:
             tensor_batch[key] = torch.as_tensor(
-                batch[key], dtype=dtypes[key], device=device
+                batch[key],
+                dtype=dtypes[key],
+                device=device,
             )
     return tensor_batch
 
 
 # ---------------------------------------------------------------------------
-# Training loop
+# Training
 # ---------------------------------------------------------------------------
 def train_epoch(ds, batch_size, model, num_classes, loss_fn, optimizer):
     model.train()
     loss = 0.0
-    for i, batch in enumerate(
-        ds.iter_torch_batches(batch_size=batch_size, collate_fn=collate_fn)
-    ):
-        optimizer.zero_grad()
-        z = model(batch)
+    ds_generator = ds.iter_torch_batches(batch_size=batch_size, collate_fn=collate_fn)
+    for i, batch in enumerate(ds_generator):
+        optimizer.zero_grad()  # Reset gradients
+        z = model(batch)  # Forward pass
         targets = F.one_hot(batch["label"], num_classes=num_classes).float()
-        J = loss_fn(z, targets)
-        J.backward()
-        optimizer.step()
-        loss += (J.detach().item() - loss) / (i + 1)
+        J = loss_fn(z, targets)  # Define loss
+        J.backward()  # Backward pass
+        optimizer.step()  # Update weights
+        loss += (J.detach().item() - loss) / (i + 1)  # Cumulative loss
     return loss
 
 
@@ -215,12 +226,13 @@ def eval_epoch(ds, batch_size, model, num_classes, loss_fn):
     model.eval()
     loss = 0.0
     y_trues, y_preds = [], []
+    ds_generator = ds.iter_torch_batches(batch_size=batch_size, collate_fn=collate_fn)
     with torch.inference_mode():
-        for i, batch in enumerate(
-            ds.iter_torch_batches(batch_size=batch_size, collate_fn=collate_fn)
-        ):
+        for i, batch in enumerate(ds_generator):
             z = model(batch)
-            targets = F.one_hot(batch["label"], num_classes=num_classes).float()
+            targets = F.one_hot(
+                batch["label"], num_classes=num_classes
+            ).float()  # one-hot (for loss_fn)
             J = loss_fn(z, targets).item()
             loss += (J - loss) / (i + 1)
             y_trues.extend(batch["label"].cpu().numpy())
@@ -229,8 +241,15 @@ def eval_epoch(ds, batch_size, model, num_classes, loss_fn):
 
 
 def train_loop_per_worker(config):
+    # Hyperparameters
     model_registry = config["model_registry"]
     experiment_name = config["experiment_name"]
+    embedding_dim = config["embedding_dim"]
+    hidden_dim = config["hidden_dim"]
+    dropout_p = config["dropout_p"]
+    lr = config["lr"]
+    lr_factor = config["lr_factor"]
+    lr_patience = config["lr_patience"]
     num_epochs = config["num_epochs"]
     batch_size = config["batch_size"]
     num_classes = config["num_classes"]
@@ -248,32 +267,34 @@ def train_loop_per_worker(config):
 
     # Model.
     model = ClassificationModel(
-        embedding_dim=config["embedding_dim"],
-        hidden_dim=config["hidden_dim"],
-        dropout_p=config["dropout_p"],
+        embedding_dim=embedding_dim,
+        hidden_dim=hidden_dim,
+        dropout_p=dropout_p,
         num_classes=num_classes,
     )
     model = ray.train.torch.prepare_model(model)
 
-    # Optimizer & scheduler.
+    # Training components.
     loss_fn = torch.nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=config["lr"])
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer,
         mode="min",
-        factor=config["lr_factor"],
-        patience=config["lr_patience"],
+        factor=lr_factor,
+        patience=lr_patience,
     )
 
-    # Train.
+    # Training.
     best_val_loss = float("inf")
     for epoch in range(num_epochs):
+        # Steps
         train_loss = train_epoch(
             train_ds, batch_size, model, num_classes, loss_fn, optimizer
         )
         val_loss, _, _ = eval_epoch(val_ds, batch_size, model, num_classes, loss_fn)
         scheduler.step(val_loss)
 
+        # Checkpoint (metrics, preprocessor and model artifacts)
         with tempfile.TemporaryDirectory() as dp:
             model.module.save(dp=dp)
             metrics = dict(
@@ -281,20 +302,23 @@ def train_loop_per_worker(config):
                 train_loss=train_loss,
                 val_loss=val_loss,
             )
-            with open(os.path.join(dp, "class_to_label.json"), "w") as fp:
+            with open(
+                os.path.join(dp, "class_to_label.json"), "w", encoding="utf-8"
+            ) as fp:
                 json.dump(config["class_to_label"], fp, indent=4)
-            if ray.train.get_context().get_world_rank() == 0:
+            if ray.train.get_context().get_world_rank() == 0:  # only on main worker 0
                 mlflow.log_metrics(metrics, step=epoch)
                 if val_loss < best_val_loss:
                     best_val_loss = val_loss
                     mlflow.log_artifacts(dp)
 
+    # End MLflow tracking.
     if ray.train.get_context().get_world_rank() == 0:
         mlflow.end_run()
 
 
 # ---------------------------------------------------------------------------
-# Evaluation helpers
+# Evaluation
 # ---------------------------------------------------------------------------
 class TorchPredictor:
     def __init__(self, preprocessor, model):
@@ -307,9 +331,25 @@ class TorchPredictor:
         batch["prediction"] = self.model.predict(collate_fn(batch, device=device))
         return batch
 
+    def predict_probabilities(self, batch, device="cuda"):
+        self.model.to(device)
+        predicted_probabilities = self.model.predict_probabilities(
+            collate_fn(batch, device=device)
+        )
+        batch["probabilities"] = [
+            {
+                self.preprocessor.label_to_class[i]: float(prob)
+                for i, prob in enumerate(probabilities)
+            }
+            for probabilities in predicted_probabilities
+        ]
+        return batch
+
     @classmethod
     def from_artifacts_dir(cls, artifacts_dir):
-        with open(os.path.join(artifacts_dir, "class_to_label.json"), "r") as fp:
+        with open(
+            os.path.join(artifacts_dir, "class_to_label.json"), "r", encoding="utf-8"
+        ) as fp:
             class_to_label = json.load(fp)
         preprocessor = Preprocessor(class_to_label=class_to_label)
         model = ClassificationModel.load(
@@ -351,7 +391,7 @@ def main():
     val_ds = preprocessor.transform(ds=val_ds)
 
     # Write preprocessed data to shared PVC storage.
-    if os.path.exists(PREPROCESSED_DATA_PATH):
+    if os.path.exists(PREPROCESSED_DATA_PATH):  # Clean up
         shutil.rmtree(PREPROCESSED_DATA_PATH)
     preprocessed_train_path = os.path.join(PREPROCESSED_DATA_PATH, "preprocessed_train")
     preprocessed_val_path = os.path.join(PREPROCESSED_DATA_PATH, "preprocessed_val")
@@ -372,8 +412,6 @@ def main():
     train_loop_config["class_to_label"] = preprocessor.class_to_label
     train_loop_config["num_classes"] = len(preprocessor.class_to_label)
 
-    from ray.train.torch import TorchTrainer
-
     trainer = TorchTrainer(
         train_loop_per_worker=train_loop_per_worker,
         train_loop_config=train_loop_config,
@@ -391,18 +429,29 @@ def main():
         order_by=["metrics.val_loss ASC"],
     )
     best_run = sorted_runs.iloc[0]
-    artifacts_dir = urlparse(best_run.artifact_uri).path
+    print(f"Best run: {best_run}")
 
+    # Load and preproces eval dataset
+    artifacts_dir = urlparse(best_run.artifact_uri).path
     predictor = TorchPredictor.from_artifacts_dir(artifacts_dir=artifacts_dir)
     test_ds = ray.data.read_images("s3://doggos-dataset/test", include_paths=True)
     test_ds = test_ds.map(add_class)
     test_ds = predictor.preprocessor.transform(ds=test_ds)
 
+    # y_pred (batch inference)
     pred_ds = test_ds.map_batches(predictor, concurrency=4, batch_size=64, num_gpus=1)
-    metrics_ds = pred_ds.map_batches(batch_metric)
-    agg = metrics_ds.sum(["TN", "FP", "FN", "TP"])
 
-    tn, fp, fn, tp = agg["sum(TN)"], agg["sum(FP)"], agg["sum(FN)"], agg["sum(TP)"]
+    # Aggregated metrics after processing all batches
+    metrics_ds = pred_ds.map_batches(batch_metric)
+    aggregate_metrics = metrics_ds.sum(["TN", "FP", "FN", "TP"])
+
+    # Aggregate the confusion matrix components across all batches
+    tn = aggregate_metrics["sum(TN)"]
+    fp = aggregate_metrics["sum(FP)"]
+    fn = aggregate_metrics["sum(FN)"]
+    tp = aggregate_metrics["sum(TP)"]
+
+    # Calculate metrics
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
     f1 = (
@@ -410,10 +459,11 @@ def main():
     )
     accuracy = (tp + tn) / (tp + tn + fp + fn)
 
-    print(f"✅ Precision: {precision:.4f}")
-    print(f"   Recall:    {recall:.4f}")
-    print(f"   F1:        {f1:.4f}")
-    print(f"   Accuracy:  {accuracy:.4f}")
+    print("✅ Evaluation complete:")
+    print(f"Precision: {precision:.2f}")
+    print(f"Recall: {recall:.2f}")
+    print(f"F1: {f1:.2f}")
+    print(f"Accuracy: {accuracy:.2f}")
 
 
 if __name__ == "__main__":

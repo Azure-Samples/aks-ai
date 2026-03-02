@@ -54,20 +54,21 @@ The training script is mounted via a ConfigMap. Pip dependencies (`torch`, `tran
 
 ## Quick Start
 
-### 1. Create the ConfigMap
-
-Package the training script so the RayJob pods can access it:
-
-```bash
-kubectl create configmap distributed-training-scripts -n ray \
-    --from-file=distributed_training.py=distributed_training.py
-```
-
-### 2. Ensure PVC and StorageClass exist
+### 1. Ensure PVC and StorageClass exist
 
 ```bash
 kubectl apply -f configs/storageclass.yaml
 kubectl apply -f configs/pvc.yaml
+```
+
+### 2. Create the ConfigMap
+
+Package the training script so the RayJob pods can access it:
+
+```bash
+kubectl create configmap distributed-training-scripts \
+    --from-file=distributed_training.py \
+    -n ray --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 ### 3. Submit the RayJob
@@ -88,137 +89,23 @@ kubectl -n ray get rayjob distributed-training -w
 kubectl -n ray logs -f -l job-name=distributed-training --tail=100
 
 # Ray Dashboard
-kubectl -n ray port-forward svc/distributed-training-raycluster-head-svc 8265:8265
+kubectl -n ray port-forward svc/distributed-training-head-svc 8265:8265
 ```
 
 ### 5. View MLflow Metrics
 
 ```bash
 # Run MLflow server inside the head pod
-kubectl -n ray exec -it <head-pod> -- \
+head_pod=$(kubectl get pod -l ray.io/node-type=head -o=jsonpath='{.items[0].metadata.name}'  -n ray)
+kubectl -n ray exec -it $head_pod -- \
     mlflow server -h 0.0.0.0 -p 8080 \
     --backend-store-uri /mnt/cluster_storage/mlflow/doggos
 
 # Port-forward in another terminal
-kubectl -n ray port-forward <head-pod> 8080:8080
+kubectl -n ray port-forward $head_pod 8080:8080
 ```
 
 MLflow UI is now available at [http://localhost:8080](http://localhost:8080).
-
-## Code Walkthrough
-
-### Preprocessing
-
-The script reads dog breed images from a public S3 bucket and converts them into CLIP embeddings using GPU actors:
-
-```python
-# doggos/embed.py — runs on GPU workers via ray.data.map_batches
-class EmbedImages:
-    def __init__(self, model_id, device="cuda"):
-        self.processor = CLIPProcessor.from_pretrained(model_id)
-        self.model = CLIPModel.from_pretrained(model_id).to(device)
-        self.device = device
-
-    def __call__(self, batch):
-        images = [Image.fromarray(np.uint8(img)).convert("RGB") for img in batch["image"]]
-        inputs = self.processor(images=images, return_tensors="pt", padding=True).to(self.device)
-        with torch.inference_mode():
-            batch["embedding"] = self.model.get_image_features(**inputs).cpu().numpy()
-        return batch
-```
-
-The `Preprocessor` class fits a class-to-label mapping and transforms datasets:
-
-```python
-train_ds = ray.data.read_images("s3://doggos-dataset/train", include_paths=True, shuffle="files")
-train_ds = train_ds.map(add_class)
-
-preprocessor = Preprocessor()
-preprocessor.fit(train_ds, column="class")
-train_ds = preprocessor.transform(ds=train_ds)  # Runs EmbedImages on GPU actors
-
-# Write to shared PVC to avoid recomputing
-train_ds.write_parquet("/mnt/cluster_storage/doggos/preprocessed_data/preprocessed_train")
-```
-
-> **AKS Note**: The original Anyscale example uses `accelerator_type="T4"`. This is removed — on AKS, GPU types are determined by the VM SKU in your node pool.
-
-### Model
-
-A simple two-layer neural net with BatchNorm and Dropout. Pure PyTorch — no Ray-specific code in the model itself:
-
-```python
-class ClassificationModel(torch.nn.Module):
-    def __init__(self, embedding_dim, hidden_dim, dropout_p, num_classes):
-        super().__init__()
-        self.fc1 = nn.Linear(embedding_dim, hidden_dim)
-        self.batch_norm = nn.BatchNorm1d(hidden_dim)
-        self.relu = nn.ReLU()
-        self.dropout = nn.Dropout(dropout_p)
-        self.fc2 = nn.Linear(hidden_dim, num_classes)
-
-    def forward(self, batch):
-        z = self.fc1(batch["embedding"])
-        z = self.batch_norm(z)
-        z = self.relu(z)
-        z = self.dropout(z)
-        return self.fc2(z)
-```
-
-### Distributed Training
-
-Ray Train wraps the PyTorch training loop with minimal changes:
-
-- `ray.train.torch.prepare_model(model)` — wraps with DDP
-- `ray.train.get_dataset_shard("train")` — each worker gets its shard
-- `ScalingConfig` — defines workers and GPUs
-
-```python
-# Scaling config — adjust based on your GPU node pool
-SCALING_CONFIG = ray.train.ScalingConfig(
-    num_workers=4,
-    use_gpu=True,
-    resources_per_worker={"CPU": 8, "GPU": 2},
-)
-
-def train_loop_per_worker(config):
-    train_ds = ray.train.get_dataset_shard("train")
-    val_ds = ray.train.get_dataset_shard("val")
-
-    model = ClassificationModel(...)
-    model = ray.train.torch.prepare_model(model)  # Wrap with DDP
-
-    for epoch in range(config["num_epochs"]):
-        train_loss = train_epoch(train_ds, ...)
-        val_loss, _, _ = eval_epoch(val_ds, ...)
-
-        # MLflow logging (rank 0 only)
-        if ray.train.get_context().get_world_rank() == 0:
-            mlflow.log_metrics({"train_loss": train_loss, "val_loss": val_loss})
-
-trainer = TorchTrainer(
-    train_loop_per_worker=train_loop_per_worker,
-    train_loop_config=train_loop_config,
-    scaling_config=SCALING_CONFIG,
-    datasets={"train": preprocessed_train_ds, "val": preprocessed_val_ds},
-)
-results = trainer.fit()
-```
-
-### Evaluation
-
-After training, the script loads the best model from MLflow and runs batch inference on the test set:
-
-```python
-predictor = TorchPredictor.from_artifacts_dir(artifacts_dir)
-test_ds = ray.data.read_images("s3://doggos-dataset/test", include_paths=True)
-test_ds = test_ds.map(add_class)
-test_ds = predictor.preprocessor.transform(ds=test_ds)
-
-pred_ds = test_ds.map_batches(predictor, concurrency=4, batch_size=64, num_gpus=1)
-```
-
-Reports precision, recall, F1, and accuracy.
 
 ## Adapting the Scaling Config
 
