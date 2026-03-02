@@ -31,7 +31,6 @@ import tempfile
 import mlflow
 from ray.train.torch import TorchTrainer
 
-from urllib.parse import urlparse
 from sklearn.metrics import multilabel_confusion_matrix
 
 # ---------------------------------------------------------------------------
@@ -255,8 +254,15 @@ def train_loop_per_worker(config):
     num_classes = config["num_classes"]
 
     # MLflow tracking (rank 0 only).
+    # Use a LOCAL temp dir for the MLflow tracking URI so that all internal
+    # MLflow file operations (append-mode metric writes, metadata updates)
+    # happen on a real POSIX filesystem.  Mountpoint S3 does NOT support
+    # open("a") (append), which MLflow FileStore uses for log_metrics().
+    # After training we copy the entire experiment tree to the S3 mount.
+    local_mlflow_dir = None
     if ray.train.get_context().get_world_rank() == 0:
-        mlflow.set_tracking_uri(f"file:{model_registry}")
+        local_mlflow_dir = tempfile.mkdtemp(prefix="mlflow_local_")
+        mlflow.set_tracking_uri(f"file:{local_mlflow_dir}")
         mlflow.set_experiment(experiment_name)
         mlflow.start_run()
         mlflow.log_params(config)
@@ -312,9 +318,17 @@ def train_loop_per_worker(config):
                     best_val_loss = val_loss
                     mlflow.log_artifacts(dp)
 
-    # End MLflow tracking.
+    # End MLflow tracking and copy results to S3 mount.
     if ray.train.get_context().get_world_rank() == 0:
         mlflow.end_run()
+        # Copy entire local MLflow tree to S3 mount using data-only copies.
+        for dirpath, dirnames, filenames in os.walk(local_mlflow_dir):
+            rel = os.path.relpath(dirpath, local_mlflow_dir)
+            dest_dir = os.path.join(model_registry, rel)
+            os.makedirs(dest_dir, exist_ok=True)
+            for fn in filenames:
+                shutil.copyfile(os.path.join(dirpath, fn), os.path.join(dest_dir, fn))
+        shutil.rmtree(local_mlflow_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -392,7 +406,7 @@ def main():
 
     # Write preprocessed data to shared PVC storage.
     if os.path.exists(PREPROCESSED_DATA_PATH):  # Clean up
-        shutil.rmtree(PREPROCESSED_DATA_PATH)
+        shutil.rmtree(PREPROCESSED_DATA_PATH, ignore_errors=True)
     preprocessed_train_path = os.path.join(PREPROCESSED_DATA_PATH, "preprocessed_train")
     preprocessed_val_path = os.path.join(PREPROCESSED_DATA_PATH, "preprocessed_val")
     train_ds.write_parquet(preprocessed_train_path)
@@ -405,7 +419,7 @@ def main():
     preprocessed_val_ds = ray.data.read_parquet(preprocessed_val_path)
 
     if os.path.isdir(MODEL_REGISTRY):
-        shutil.rmtree(MODEL_REGISTRY)
+        shutil.rmtree(MODEL_REGISTRY, ignore_errors=True)
     os.makedirs(MODEL_REGISTRY, exist_ok=True)
 
     train_loop_config = TRAIN_LOOP_CONFIG.copy()
@@ -432,7 +446,12 @@ def main():
     print(f"Best run: \n{best_run}")
 
     # Load and preproces eval dataset
-    artifacts_dir = urlparse(best_run.artifact_uri).path
+    # Construct the artifacts path on the S3 mount directly from run metadata,
+    # because the artifact_uri stored in MLflow still references the local
+    # temp dir that was used during training (now deleted).
+    artifacts_dir = os.path.join(
+        MODEL_REGISTRY, best_run.experiment_id, best_run.run_id, "artifacts"
+    )
     predictor = TorchPredictor.from_artifacts_dir(artifacts_dir=artifacts_dir)
     test_ds = ray.data.read_images("s3://doggos-dataset/test", include_paths=True)
     test_ds = test_ds.map(add_class)

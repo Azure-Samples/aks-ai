@@ -52,11 +52,11 @@ spec:
                   name: client
               resources:
                 limits:
-                  cpu: "8"
-                  memory: "32Gi"
+                  cpu: "4"
+                  memory: "16Gi"
                 requests:
-                  cpu: "8"
-                  memory: "32Gi"
+                  cpu: "4"
+                  memory: "16Gi"
               volumeMounts:
                 - name: scripts
                   mountPath: /home/ray/scripts

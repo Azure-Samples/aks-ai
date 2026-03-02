@@ -30,4 +30,5 @@ helm install kuberay-operator kuberay/kuberay-operator \
     --version 1.5.1 \
     --create-namespace \
     --namespace ray \
+    --set nodeSelector.agentpool=system \
     --wait
