@@ -56,11 +56,11 @@ TRAIN_LOOP_CONFIG = {
 }
 
 # Adjust num_workers and resources_per_worker based on your GPU node pool.
-NUM_WORKERS = 4
+NUM_WORKERS = 2
 SCALING_CONFIG = ray.train.ScalingConfig(
     num_workers=NUM_WORKERS,
     use_gpu=True,
-    resources_per_worker={"CPU": 8, "GPU": 4},
+    resources_per_worker={"CPU": 8, "GPU": 8},
 )
 
 
@@ -429,7 +429,7 @@ def main():
         order_by=["metrics.val_loss ASC"],
     )
     best_run = sorted_runs.iloc[0]
-    print(f"Best run: {best_run}")
+    print(f"Best run: \n{best_run}")
 
     # Load and preproces eval dataset
     artifacts_dir = urlparse(best_run.artifact_uri).path

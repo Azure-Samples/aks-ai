@@ -109,13 +109,13 @@ MLflow UI is now available at [http://localhost:8080](http://localhost:8080).
 
 ## Adapting the Scaling Config
 
-The default `rayjob.yaml` is configured for **2 GPU worker nodes with 4 GPUs each** (e.g., `Standard_NC24ads_A100_v4`). Adjust for your setup:
+The default `rayjob.yaml` is configured for **2 GPU worker nodes with 8 GPUs each** (e.g., `Standard_ND96asr_v4`). Adjust for your setup:
 
 | Node Pool VM SKU | GPUs/Node | `NUM_WORKERS` | `resources_per_worker` |
 |---|---|---|---|
 | `Standard_NC6s_v3` (V100) | 1 | 2 | `{"CPU": 4, "GPU": 1}` |
-| `Standard_NC24ads_A100_v4` (A100) | 4 | 4 | `{"CPU": 8, "GPU": 2}` |
-| `Standard_ND96asr_v4` (A100 x8) | 8 | 8 | `{"CPU": 8, "GPU": 1}` |
+| `Standard_NC24ads_A100_v4` (A100) | 4 | 2 | `{"CPU": 8, "GPU": 4}` |
+| `Standard_ND96asr_v4` (A100 x8) | 8 | 2 | `{"CPU": 8, "GPU": 8}` |
 
 Update both `rayjob.yaml` (worker replicas and GPU limits) and the constants at the top of `distributed_training.py`.
 
