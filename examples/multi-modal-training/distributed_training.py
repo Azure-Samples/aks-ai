@@ -105,7 +105,7 @@ class Preprocessor:
         self.label_to_class = {v: k for k, v in self.class_to_label.items()}
         return self
 
-    def transform(self, ds, concurrency=4, batch_size=64, num_gpus=1):
+    def transform(self, ds, concurrency=16, batch_size=64, num_gpus=1):
         ds = ds.map(
             convert_to_label,
             fn_kwargs={"class_to_label": self.class_to_label},

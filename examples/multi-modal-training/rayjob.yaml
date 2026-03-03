@@ -19,7 +19,6 @@ spec:
       RAY_TRAIN_WORKER_GROUP_START_TIMEOUT_S: "120"
 
   shutdownAfterJobFinishes: false   # keep cluster alive to inspect results
-  # ttlSecondsAfterFinished: 3600   # clean up 1 h after completion
 
   rayClusterSpec:
     rayVersion: "2.48.0"
@@ -32,8 +31,15 @@ spec:
         disable-usage-stats: "true"
       template:
         spec:
-          nodeSelector:
-            nodepool: nebius-cpu-nodepool
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: nodepool
+                        operator: In
+                        values:
+                          - nebius-cpu-nodepool
           containers:
             - name: ray-head
               image: rayproject/ray:2.48.0-py312

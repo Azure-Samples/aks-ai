@@ -2,15 +2,17 @@
 
 NAMESPACE=ray
 
-# Install kuberay
-helm repo add kuberay https://ray-project.github.io/kuberay-helm/
-helm repo update
-helm install kuberay-operator kuberay/kuberay-operator \
-    --version 1.5.1 \
-    --create-namespace \
-    --namespace $NAMESPACE \
-    --set nodeSelector.agentpool=system \
-    --wait
+# Install kuberay (skip if already deployed)
+if ! helm status kuberay-operator -n $NAMESPACE &>/dev/null; then
+    helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+    helm repo update
+    helm install kuberay-operator kuberay/kuberay-operator \
+        --version 1.5.1 \
+        --create-namespace \
+        --namespace $NAMESPACE \
+        --set nodeSelector.agentpool=system \
+        --wait
+fi
 
 # Clean up existing rayjob
 kubectl -n $NAMESPACE delete rayjob distributed-training
