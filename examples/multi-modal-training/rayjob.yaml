@@ -16,6 +16,7 @@ spec:
       - "doggos @ git+https://github.com/anyscale/multimodal-ai.git#subdirectory=doggos"
     env_vars:
       RAY_TRAIN_V2_ENABLED: "1"
+      RAY_TRAIN_WORKER_GROUP_START_TIMEOUT_S: "120"
 
   shutdownAfterJobFinishes: false   # keep cluster alive to inspect results
   # ttlSecondsAfterFinished: 3600   # clean up 1 h after completion
@@ -60,8 +61,6 @@ spec:
               volumeMounts:
                 - name: scripts
                   mountPath: /home/ray/scripts
-                - name: cluster-storage
-                  mountPath: /mnt/cluster_storage
           volumes:
             - name: scripts
               configMap:
@@ -69,9 +68,6 @@ spec:
                 items:
                   - key: distributed_training.py
                     path: distributed_training.py
-            - name: cluster-storage
-              persistentVolumeClaim:
-                claimName: cluster-storage
 
     workerGroupSpecs:
       - groupName: gpu-workers
@@ -101,8 +97,6 @@ spec:
                 volumeMounts:
                   - name: scripts
                     mountPath: /home/ray/scripts
-                  - name: cluster-storage
-                    mountPath: /mnt/cluster_storage
             volumes:
               - name: scripts
                 configMap:
@@ -110,6 +104,3 @@ spec:
                   items:
                     - key: distributed_training.py
                       path: distributed_training.py
-              - name: cluster-storage
-                persistentVolumeClaim:
-                  claimName: cluster-storage

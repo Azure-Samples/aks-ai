@@ -6,10 +6,11 @@ Adapted from: https://docs.ray.io/en/latest/ray-overview/examples/e2e-multimodal
 This script runs on the RayCluster (submitted via RayJob). It:
   1. Preprocesses dog breed images using CLIP embeddings (Ray Data + GPU actors)
   2. Trains a classifier with Ray Train TorchTrainer (distributed DDP)
-  3. Logs metrics/artifacts to MLflow on shared PVC storage
+  3. Logs metrics to MLflow, saves best model via Ray object store
   4. Evaluates the model on a held-out test set
 """
 
+import gc
 import os
 import ray
 
@@ -33,16 +34,26 @@ from ray.train.torch import TorchTrainer
 
 from sklearn.metrics import multilabel_confusion_matrix
 
+
+# ---------------------------------------------------------------------------
+# Model store – passes best model from training workers to driver via Ray
+# ---------------------------------------------------------------------------
+@ray.remote
+class _ModelStore:
+    def __init__(self):
+        self._artifacts = None
+
+    def put(self, artifacts):
+        self._artifacts = artifacts
+
+    def get(self):
+        return self._artifacts
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-STORAGE_PATH = "/mnt/cluster_storage"
-PREPROCESSED_DATA_PATH = os.path.join(STORAGE_PATH, "doggos/preprocessed_data")
-MODEL_REGISTRY = os.path.join(STORAGE_PATH, "mlflow/doggos")
-
 EXPERIMENT_NAME = "doggos"
 TRAIN_LOOP_CONFIG = {
-    "model_registry": MODEL_REGISTRY,
     "experiment_name": EXPERIMENT_NAME,
     "embedding_dim": 512,
     "hidden_dim": 256,
@@ -241,7 +252,6 @@ def eval_epoch(ds, batch_size, model, num_classes, loss_fn):
 
 def train_loop_per_worker(config):
     # Hyperparameters
-    model_registry = config["model_registry"]
     experiment_name = config["experiment_name"]
     embedding_dim = config["embedding_dim"]
     hidden_dim = config["hidden_dim"]
@@ -292,6 +302,7 @@ def train_loop_per_worker(config):
 
     # Training.
     best_val_loss = float("inf")
+    best_state = None
     for epoch in range(num_epochs):
         # Steps
         train_loss = train_epoch(
@@ -300,34 +311,32 @@ def train_loop_per_worker(config):
         val_loss, _, _ = eval_epoch(val_ds, batch_size, model, num_classes, loss_fn)
         scheduler.step(val_loss)
 
-        # Checkpoint (metrics, preprocessor and model artifacts)
-        with tempfile.TemporaryDirectory() as dp:
-            model.module.save(dp=dp)
-            metrics = dict(
-                lr=optimizer.param_groups[0]["lr"],
-                train_loss=train_loss,
-                val_loss=val_loss,
-            )
-            with open(
-                os.path.join(dp, "class_to_label.json"), "w", encoding="utf-8"
-            ) as fp:
-                json.dump(config["class_to_label"], fp, indent=4)
-            if ray.train.get_context().get_world_rank() == 0:  # only on main worker 0
-                mlflow.log_metrics(metrics, step=epoch)
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    mlflow.log_artifacts(dp)
+        metrics = dict(
+            lr=optimizer.param_groups[0]["lr"],
+            train_loss=train_loss,
+            val_loss=val_loss,
+        )
+        if ray.train.get_context().get_world_rank() == 0:
+            mlflow.log_metrics(metrics, step=epoch)
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                best_state = {
+                    "state_dict": {k: v.cpu() for k, v in model.module.state_dict().items()},
+                    "args": {
+                        "embedding_dim": embedding_dim,
+                        "hidden_dim": hidden_dim,
+                        "dropout_p": dropout_p,
+                        "num_classes": num_classes,
+                    },
+                    "class_to_label": config["class_to_label"],
+                }
+        ray.train.report(metrics)
 
-    # End MLflow tracking and copy results to S3 mount.
+    # Save best model to the shared actor and end MLflow tracking.
     if ray.train.get_context().get_world_rank() == 0:
+        store = ray.get_actor("model_store")
+        ray.get(store.put.remote(best_state))
         mlflow.end_run()
-        # Copy entire local MLflow tree to S3 mount using data-only copies.
-        for dirpath, dirnames, filenames in os.walk(local_mlflow_dir):
-            rel = os.path.relpath(dirpath, local_mlflow_dir)
-            dest_dir = os.path.join(model_registry, rel)
-            os.makedirs(dest_dir, exist_ok=True)
-            for fn in filenames:
-                shutil.copyfile(os.path.join(dirpath, fn), os.path.join(dest_dir, fn))
         shutil.rmtree(local_mlflow_dir, ignore_errors=True)
 
 
@@ -404,23 +413,15 @@ def main():
     train_ds = preprocessor.transform(ds=train_ds)
     val_ds = preprocessor.transform(ds=val_ds)
 
-    # Write preprocessed data to shared PVC storage.
-    if os.path.exists(PREPROCESSED_DATA_PATH):  # Clean up
-        shutil.rmtree(PREPROCESSED_DATA_PATH, ignore_errors=True)
-    preprocessed_train_path = os.path.join(PREPROCESSED_DATA_PATH, "preprocessed_train")
-    preprocessed_val_path = os.path.join(PREPROCESSED_DATA_PATH, "preprocessed_val")
-    train_ds.write_parquet(preprocessed_train_path)
-    val_ds.write_parquet(preprocessed_val_path)
-    print("✅ Preprocessed data written to", PREPROCESSED_DATA_PATH)
+    # Cache preprocessed data in Ray object store (no shared filesystem needed).
+    train_ds = train_ds.materialize()
+    val_ds = val_ds.materialize()
+    gc.collect()  # release preprocessing actors so GPUs are free for training
+    print("✅ Preprocessed data cached in Ray object store")
 
     # === Train ===
     print("🚀 Starting distributed training ...")
-    preprocessed_train_ds = ray.data.read_parquet(preprocessed_train_path)
-    preprocessed_val_ds = ray.data.read_parquet(preprocessed_val_path)
-
-    if os.path.isdir(MODEL_REGISTRY):
-        shutil.rmtree(MODEL_REGISTRY, ignore_errors=True)
-    os.makedirs(MODEL_REGISTRY, exist_ok=True)
+    model_store = _ModelStore.options(name="model_store").remote()
 
     train_loop_config = TRAIN_LOOP_CONFIG.copy()
     train_loop_config["class_to_label"] = preprocessor.class_to_label
@@ -430,29 +431,20 @@ def main():
         train_loop_per_worker=train_loop_per_worker,
         train_loop_config=train_loop_config,
         scaling_config=SCALING_CONFIG,
-        datasets={"train": preprocessed_train_ds, "val": preprocessed_val_ds},
+        datasets={"train": train_ds, "val": val_ds},
     )
     results = trainer.fit()
     print("✅ Training complete:", results)
 
     # === Evaluate ===
     print("📊 Evaluating on test set ...")
-    mlflow.set_tracking_uri(f"file:{MODEL_REGISTRY}")
-    sorted_runs = mlflow.search_runs(
-        experiment_names=[EXPERIMENT_NAME],
-        order_by=["metrics.val_loss ASC"],
+    best_artifacts = ray.get(model_store.get.remote())
+    model = ClassificationModel(**best_artifacts["args"])
+    model.load_state_dict(best_artifacts["state_dict"])
+    predictor = TorchPredictor(
+        preprocessor=Preprocessor(class_to_label=best_artifacts["class_to_label"]),
+        model=model,
     )
-    best_run = sorted_runs.iloc[0]
-    print(f"Best run: \n{best_run}")
-
-    # Load and preproces eval dataset
-    # Construct the artifacts path on the S3 mount directly from run metadata,
-    # because the artifact_uri stored in MLflow still references the local
-    # temp dir that was used during training (now deleted).
-    artifacts_dir = os.path.join(
-        MODEL_REGISTRY, best_run.experiment_id, best_run.run_id, "artifacts"
-    )
-    predictor = TorchPredictor.from_artifacts_dir(artifacts_dir=artifacts_dir)
     test_ds = ray.data.read_images("s3://doggos-dataset/test", include_paths=True)
     test_ds = test_ds.map(add_class)
     test_ds = predictor.preprocessor.transform(ds=test_ds)
