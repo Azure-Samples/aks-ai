@@ -33,7 +33,7 @@ spec:
       template:
         spec:
           nodeSelector:
-            agentpool: system
+            nodepool: nebius-cpu-nodepool
           containers:
             - name: ray-head
               image: rayproject/ray:2.48.0-py312
@@ -53,11 +53,11 @@ spec:
                   name: client
               resources:
                 limits:
-                  cpu: "4"
-                  memory: "16Gi"
+                  cpu: "14"
+                  memory: "60Gi"
                 requests:
-                  cpu: "4"
-                  memory: "16Gi"
+                  cpu: "14"
+                  memory: "60Gi"
               volumeMounts:
                 - name: scripts
                   mountPath: /home/ray/scripts
@@ -79,6 +79,15 @@ spec:
           num-cpus: "64"
         template:
           spec:
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                    - matchExpressions:
+                        - key: node.kubernetes.io/instance-type
+                          operator: In
+                          values:
+                            - gpu-h100-sxm-8gpu-128vcpu-1600gb
             containers:
               - name: ray-worker
                 image: rayproject/ray:2.48.0-py312-gpu

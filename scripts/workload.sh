@@ -2,20 +2,30 @@
 
 NAMESPACE=ray
 
-# 5. Clean up existing
+# Install kuberay
+helm repo add kuberay https://ray-project.github.io/kuberay-helm/
+helm repo update
+helm install kuberay-operator kuberay/kuberay-operator \
+    --version 1.5.1 \
+    --create-namespace \
+    --namespace $NAMESPACE \
+    --set nodeSelector.agentpool=system \
+    --wait
+
+# Clean up existing rayjob
 kubectl -n $NAMESPACE delete rayjob distributed-training
 
 
-# 1. Create the ConfigMap holding the job script
+# Create the ConfigMap holding the job script
 kubectl create configmap distributed-training-scripts \
     --from-file=examples/multi-modal-training/distributed_training.py \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
 
-# 2. Submit the RayJob (creates its own transient cluster)
+# Submit the RayJob (creates its own transient cluster)
 kubectl apply -f examples/multi-modal-training/rayjob.yaml
 
-# 3. Wait for the job's pod to be running before streaming logs
+# Wait for the job's pod to be running before streaming logs
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/created-by=kuberay-operator -n $NAMESPACE  --timeout=300s
 kubectl wait --for=condition=Ready pod -l job-name=distributed-training -n $NAMESPACE --timeout=300s
 kubectl -n $NAMESPACE get pods -o wide

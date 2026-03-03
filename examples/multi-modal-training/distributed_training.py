@@ -13,6 +13,7 @@ This script runs on the RayCluster (submitted via RayJob). It:
 import gc
 import os
 import ray
+import pyarrow.fs
 
 import numpy as np
 import torch
@@ -66,11 +67,11 @@ TRAIN_LOOP_CONFIG = {
 }
 
 # Adjust num_workers and resources_per_worker based on your GPU node pool.
-NUM_WORKERS = 2
+NUM_WORKERS = 16
 SCALING_CONFIG = ray.train.ScalingConfig(
     num_workers=NUM_WORKERS,
     use_gpu=True,
-    resources_per_worker={"CPU": 8, "GPU": 8},
+    resources_per_worker={"CPU": 1, "GPU": 1},
 )
 
 
@@ -401,11 +402,21 @@ def main():
 
     # === Preprocess ===
     print("📦 Preprocessing datasets ...")
+    s3 = pyarrow.fs.S3FileSystem(
+        anonymous=True,
+        region="us-west-2",
+        connect_timeout=30,
+        request_timeout=60,
+        retry_strategy=pyarrow.fs.AwsStandardS3RetryStrategy(max_attempts=10),
+    )
     train_ds = ray.data.read_images(
-        "s3://doggos-dataset/train", include_paths=True, shuffle="files"
+        "s3://doggos-dataset/train", include_paths=True, shuffle="files",
+        filesystem=s3,
     )
     train_ds = train_ds.map(add_class)
-    val_ds = ray.data.read_images("s3://doggos-dataset/val", include_paths=True)
+    val_ds = ray.data.read_images(
+        "s3://doggos-dataset/val", include_paths=True, filesystem=s3,
+    )
     val_ds = val_ds.map(add_class)
 
     preprocessor = Preprocessor()
@@ -445,7 +456,9 @@ def main():
         preprocessor=Preprocessor(class_to_label=best_artifacts["class_to_label"]),
         model=model,
     )
-    test_ds = ray.data.read_images("s3://doggos-dataset/test", include_paths=True)
+    test_ds = ray.data.read_images(
+        "s3://doggos-dataset/test", include_paths=True, filesystem=s3,
+    )
     test_ds = test_ds.map(add_class)
     test_ds = predictor.preprocessor.transform(ds=test_ds)
 
