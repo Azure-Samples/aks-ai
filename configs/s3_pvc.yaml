@@ -15,8 +15,10 @@ spec:
     - allow-delete
     - allow-overwrite
     - region us-east-2
-    - --no-sign-request
   csi:
+    nodePublishSecretRef:
+      name: aws-secret
+      namespace: kube-system
     driver: s3.csi.aws.com
     volumeHandle: s3-csi-driver-volume
     volumeAttributes:
