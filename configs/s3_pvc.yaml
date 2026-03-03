@@ -15,6 +15,7 @@ spec:
     - allow-delete
     - allow-overwrite
     - region us-east-2
+    - --no-sign-request
   csi:
     driver: s3.csi.aws.com
     volumeHandle: s3-csi-driver-volume
