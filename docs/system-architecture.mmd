@@ -1,0 +1,53 @@
+graph TB
+    AKS["AKS Control Plane"]
+
+    subgraph Azure["Azure Cloud — VNet"]
+        COREDNS["CoreDNS"]
+        KARP["Flex Karpenter"]
+        subgraph AzureCpuPool["CPU Pool"]
+            AHEAD["Ray Head Pod"]
+        end
+        subgraph GpuPool["GPU Pool (H100)"]
+            AWORK["Ray Worker Pods"]
+        end
+        AVPN["VPN Gateway"]
+    end
+
+    subgraph Nebius["Nebius Cloud — VPC"]
+        subgraph NebiusCpuPool["CPU Pool"]
+            NHEAD["Ray Head Pod"]
+        end
+        subgraph NebiusGpuPool["GPU Pool (H100)"]
+            NWORK["Worker Pods"]
+        end
+        NVPN["Gateway Peer"]
+    end
+
+    %% Control plane to Nebius
+    AKS -->|"Kubeadm join"| NebiusCpuPool
+    AKS -->|"Kubeadm join"| NebiusGpuPool
+
+    %% Flex Karpenter manages node pool lifecycle
+    KARP -->|"Manage lifecycle"| AzureCpuPool
+    KARP -->|"Manage lifecycle"| GpuPool
+    KARP -->|"Manage lifecycle"| NebiusCpuPool
+    KARP -->|"Manage lifecycle"| NebiusGpuPool
+
+    %% DNS resolution
+    AWORK -->|"DNS resolution"| COREDNS
+    NWORK -->|"DNS resolution"| NVPN <-->|"VPN Tunnel"| AVPN -->|"DNS resolution"| COREDNS
+
+    %% Styles
+    classDef azure fill:#0078d4,stroke:#005a9e,color:#fff
+    classDef nebius fill:#7b2d8e,stroke:#5a1d6e,color:#fff
+    classDef control fill:#0f4c81,stroke:#0a3560,color:#fff
+    classDef workload fill:#e8731a,stroke:#c55f12,color:#fff
+    classDef gateway fill:#d4a017,stroke:#b8860b,color:#fff
+    classDef system fill:#2ea44f,stroke:#22863a,color:#fff
+    classDef karpenter fill:#1a9988,stroke:#147a6c,color:#fff
+
+    class AKS control
+    class KARP karpenter
+    class COREDNS system
+    class AHEAD,AWORK,NHEAD,NWORK workload
+    class AVPN,NVPN gateway
