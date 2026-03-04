@@ -15,9 +15,8 @@ spec:
       - scikit-learn==1.6.0
       - "doggos @ git+https://github.com/anyscale/multimodal-ai.git#subdirectory=doggos"
     env_vars:
-      EMBEDDINGS_DIR: "/mnt/cluster_storage/doggos/embeddings"
       BATCH_SIZE: "64"
-      NUM_GPU_ACTORS: "4"
+      NUM_GPU_ACTORS: "16"
       TOP_K: "5"
 
   shutdownAfterJobFinishes: false   # keep cluster alive to inspect results
@@ -61,16 +60,14 @@ spec:
                   name: client
               resources:
                 limits:
-                  cpu: "8"
-                  memory: "32Gi"
+                  cpu: "4"
+                  memory: "16Gi"
                 requests:
-                  cpu: "8"
-                  memory: "32Gi"
+                  cpu: "4"
+                  memory: "16Gi"
               volumeMounts:
                 - name: scripts
                   mountPath: /home/ray/scripts
-                - name: cluster-storage
-                  mountPath: /mnt/cluster_storage
           volumes:
             - name: scripts
               configMap:
@@ -78,29 +75,26 @@ spec:
                 items:
                   - key: batch_inference.py
                     path: batch_inference.py
-            - name: cluster-storage
-              persistentVolumeClaim:
-                claimName: cluster-storage
 
     workerGroupSpecs:
       - groupName: gpu-workers
         replicas: 2
-        minReplicas: 1
-        maxReplicas: 1
+        minReplicas: 2
+        maxReplicas: 2
         rayStartParams:
           num-gpus: "8"
           num-cpus: "64"
         template:
           spec:
-            affinity:
-              nodeAffinity:
-                requiredDuringSchedulingIgnoredDuringExecution:
-                  nodeSelectorTerms:
-                    - matchExpressions:
-                        - key: node.kubernetes.io/instance-type
-                          operator: In
-                          values:
-                            - gpu-h100-sxm-8gpu-128vcpu-1600gb
+            # affinity:
+            #   nodeAffinity:
+            #     requiredDuringSchedulingIgnoredDuringExecution:
+            #       nodeSelectorTerms:
+            #         - matchExpressions:
+            #             - key: node.kubernetes.io/instance-type
+            #               operator: In
+            #               values:
+            #                 - gpu-h100-sxm-8gpu-128vcpu-1600gb
             containers:
               - name: ray-worker
                 image: rayproject/ray:2.48.0-py312-gpu
@@ -116,8 +110,6 @@ spec:
                 volumeMounts:
                   - name: scripts
                     mountPath: /home/ray/scripts
-                  - name: cluster-storage
-                    mountPath: /mnt/cluster_storage
             volumes:
               - name: scripts
                 configMap:
@@ -125,6 +117,3 @@ spec:
                   items:
                     - key: batch_inference.py
                       path: batch_inference.py
-              - name: cluster-storage
-                persistentVolumeClaim:
-                  claimName: cluster-storage

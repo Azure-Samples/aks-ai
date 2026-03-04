@@ -7,7 +7,7 @@ This script runs on the RayCluster (submitted via RayJob). It:
   1. Reads dog breed images from a public S3 bucket (distributed CPU read)
   2. Adds class labels extracted from file paths (distributed CPU map)
   3. Generates CLIP embeddings in batches (distributed GPU map_batches)
-  4. Writes embeddings to shared storage as Parquet (distributed CPU write)
+  4. Materializes embeddings into Ray's shared memory object store
   5. Demonstrates similarity search on the generated embeddings
 """
 
@@ -19,8 +19,6 @@ import torch
 from PIL import Image
 from transformers import CLIPModel, CLIPProcessor
 
-import shutil
-
 from io import BytesIO
 import requests
 from doggos.embed import get_top_matches, display_top_matches
@@ -31,9 +29,6 @@ from doggos.embed import get_top_matches, display_top_matches
 # ---------------------------------------------------------------------------
 MODEL_ID = "openai/clip-vit-base-patch32"
 S3_DATASET_PATH = "s3://doggos-dataset/train"
-EMBEDDINGS_DIR = os.environ.get(
-    "EMBEDDINGS_DIR", "/mnt/cluster_storage/doggos/embeddings"
-)
 BATCH_SIZE = int(os.environ.get("BATCH_SIZE", "64"))
 NUM_GPU_ACTORS = int(os.environ.get("NUM_GPU_ACTORS", "4"))
 SAMPLE_IMAGE_URL = os.environ.get(
@@ -109,18 +104,16 @@ def main():
             "model_id": MODEL_ID,
             "device": "cuda",
         },
-        compute=ray.data.ActorPoolStrategy(size=NUM_GPU_ACTORS),
+        concurrency=NUM_GPU_ACTORS,
         batch_size=BATCH_SIZE,
         num_gpus=1,
     )
     embeddings_ds = embeddings_ds.drop_columns(["image"])  # remove image column
 
-    # ── 4. Write to shared storage (distributed CPU write) ──────────────
-    print(f"Writing embeddings to {EMBEDDINGS_DIR} ...")
-    if os.path.exists(EMBEDDINGS_DIR):
-        shutil.rmtree(EMBEDDINGS_DIR)
-    embeddings_ds.write_parquet(EMBEDDINGS_DIR)
-    print("Embeddings written successfully.")
+    # ── 4. Materialize into Ray object store ─────────────────────────────
+    print("Materializing embeddings into Ray object store ...")
+    embeddings_ds = embeddings_ds.materialize()
+    print(f"Embeddings materialized — {embeddings_ds.count()} rows in object store.")
 
     # ── 5. Similarity search demo ───────────────────────────────────────
     print(f"\nRunning similarity search against: {SAMPLE_IMAGE_URL}")
@@ -133,18 +126,17 @@ def main():
     query_embedding = embed_fn({"image": [query_image]})["embedding"][0]
     print(f"Query embedding shape: {np.shape(query_embedding)}")
 
-    # Read back the stored embeddings
-    stored_ds = ray.data.read_parquet(EMBEDDINGS_DIR)
-    top_matches = get_top_matches(query_embedding, stored_ds, n=TOP_K)
+    # Use the materialized dataset directly from the object store
+    top_matches = get_top_matches(query_embedding, embeddings_ds, n=TOP_K)
     display_top_matches(SAMPLE_IMAGE_URL, top_matches)
 
-    # print(f"\nTop {TOP_K} similar images:")
-    # for i, match in enumerate(top_matches, 1):
-    #     print(
-    #         f"  {i}. class={match['class']:<20s}  "
-    #         f"similarity={match['similarity']:.4f}  "
-    #         f"path={match['path']}"
-    #     )
+    print(f"\nTop {TOP_K} similar images:")
+    for i, match in enumerate(top_matches, 1):
+        print(
+            f"  {i}. class={match['class']:<20s}  "
+            f"similarity={match['similarity']:.4f}  "
+            f"path={match['path']}"
+        )
 
     print("\nBatch inference pipeline completed.")
 

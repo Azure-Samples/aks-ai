@@ -9,7 +9,7 @@ It is adapted from the [Ray E2E Multimodal AI Workloads — Batch Inference](htt
 1. **Distributed Read** — Reads dog breed images from a public S3 bucket using Ray Data (CPU).
 2. **Preprocessing** — Adds class labels extracted from file paths using `map` (CPU).
 3. **Batch Embedding** — Generates CLIP embeddings with GPU actors via `map_batches` (GPU).
-4. **Distributed Write** — Writes embeddings to shared storage as Parquet (CPU).
+4. **Materialize** — Materializes embeddings into Ray's shared memory object store.
 5. **Similarity Search** — Embeds a query image and retrieves the most similar images by cosine similarity.
 
 The pipeline uses Ray Data's **streaming execution**, which processes data in chunks as they're loaded — avoiding OOM errors on large datasets and maximizing GPU utilization by overlapping CPU preprocessing with GPU inference.
@@ -21,7 +21,7 @@ S3 (images) ──► read_images (CPU) ──► map(add_class) (CPU)
                         map_batches(EmbedImages) (GPU × N)
                                            │
                                            ▼
-                           write_parquet (CPU) ──► Shared Storage
+                              materialize() ──► Ray Object Store
 ```
 
 ## Prerequisites
@@ -31,7 +31,6 @@ S3 (images) ──► read_images (CPU) ──► map(add_class) (CPU)
 | AKS cluster | Created via `scripts/setup.sh` with GPU node pool |
 | NVIDIA device plugin | Installed via cluster setup |
 | KubeRay operator | v1.5.1+, installed via cluster setup |
-| Shared PVC | `cluster-storage` (ReadWriteMany), created via `configs/pvc.yaml` |
 | Ray | 2.48.0 |
 
 ## Files
@@ -40,7 +39,6 @@ S3 (images) ──► read_images (CPU) ──► map(add_class) (CPU)
 |---|---|
 | `batch_inference.py` | Batch inference script — runs on the RayCluster |
 | `rayjob.yaml` | RayJob manifest — submits the script and manages the cluster |
-| `requirements.txt` | Python dependencies |
 
 ## Architecture
 
@@ -52,27 +50,23 @@ kubectl apply -f rayjob.yaml
 │ RayJob: batch-inference                          │
 │                                                  │
 │  Head Pod (CPU, system node pool)                │
-│  ├── batch_inference.py (entrypoint)             │
-│  └── /mnt/cluster_storage (Azure Blob PVC)       │
+│  ├── batch_inference.py (entrypoint via ConfigMap)│
+│  └── Drives the Ray Data pipeline                │
 │                                                  │
-│  Worker Pods (GPU) × 1                           │
-│  ├── Ray Data actors (CLIP embedding, GPU)       │
-│  └── /mnt/cluster_storage (Azure Blob PVC)       │
+│  Worker Pods (GPU) × 2                           │
+│  ├── 8 GPUs each (16 total)                      │
+│  └── CLIP embedding actors via map_batches       │
+│                                                  │
+│  Ray Object Store (shared memory)                │
+│  └── Materialized embeddings (ephemeral)         │
 └──────────────────────────────────────────────────┘
 ```
 
-The script is mounted via a ConfigMap. Pip dependencies (`torch`, `transformers`, `scipy`, etc.) are installed on all nodes at job start via `runtimeEnvYAML` in `rayjob.yaml`.
+The script is mounted via a ConfigMap. Pip dependencies (`torch`, `transformers`, `doggos`, etc.) are installed on all nodes at job start via `runtimeEnvYAML` in `rayjob.yaml`.
 
 ## Quick Start
 
-### 1. Ensure PVC and StorageClass exist
-
-```bash
-kubectl apply -f configs/storageclass.yaml
-kubectl apply -f configs/pvc.yaml
-```
-
-### 2. Create the ConfigMap
+### 1. Create the ConfigMap
 
 Package the batch inference script so the RayJob pods can access it:
 
@@ -82,15 +76,15 @@ kubectl create configmap batch-inference-scripts \
     -n ray --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-### 3. Submit the RayJob
+### 2. Submit the RayJob
 
 ```bash
 kubectl apply -f rayjob.yaml
 ```
 
-This creates a RayCluster (head + 1 GPU worker), installs pip dependencies via `runtimeEnvYAML`, runs `batch_inference.py`, and keeps the cluster alive for inspection.
+This creates a RayCluster (head + 2 GPU workers with 8 GPUs each), installs pip dependencies via `runtimeEnvYAML`, runs `batch_inference.py`, and keeps the cluster alive for inspection.
 
-### 4. Monitor
+### 3. Monitor
 
 ```bash
 # Watch job status
@@ -105,21 +99,18 @@ kubectl -n ray port-forward svc/batch-inference-head-svc 8265:8265
 
 Then open [http://localhost:8265](http://localhost:8265) for the Ray Dashboard.
 
-### 5. Inspect Results
+### 4. Review Output
 
-After the job completes, the embeddings are stored at `/mnt/cluster_storage/doggos/embeddings` on the PVC. You can inspect them from any pod with the PVC mounted:
+Embeddings are materialized into Ray's in-memory object store and used directly for the similarity search. The top-K results are printed in the job logs:
 
-```bash
-head_pod=$(kubectl get pod -l ray.io/node-type=head -o=jsonpath='{.items[0].metadata.name}' -n ray)
-kubectl -n ray exec -it $head_pod -- python -c "
-import ray
-ray.init()
-ds = ray.data.read_parquet('/mnt/cluster_storage/doggos/embeddings')
-print(ds.schema())
-print(f'Total rows: {ds.count()}')
-print(ds.take(3))
-"
 ```
+Top 5 similar images:
+  1. class=border_collie        similarity=0.8176  path=s3://...
+  2. class=yorkshire_terrier    similarity=0.8079  path=s3://...
+  ...
+```
+
+Since embeddings live in Ray's object store, they are **ephemeral** — they exist only while the RayCluster is running. Set `shutdownAfterJobFinishes: false` (the default in `rayjob.yaml`) to keep the cluster alive for interactive inspection via the Ray Dashboard.
 
 ## Configuration
 
@@ -127,9 +118,8 @@ print(ds.take(3))
 
 | Variable | Default | Description |
 |---|---|---|
-| `EMBEDDINGS_DIR` | `/mnt/cluster_storage/doggos/embeddings` | Output directory for Parquet files |
 | `BATCH_SIZE` | `64` | Batch size for CLIP embedding |
-| `NUM_GPU_ACTORS` | `4` | Number of GPU actor replicas |
+| `NUM_GPU_ACTORS` | `4` | Number of GPU actor replicas (set to `16` in `rayjob.yaml`) |
 | `TOP_K` | `5` | Number of similar images to retrieve |
 | `SAMPLE_IMAGE_URL` | `https://doggos-dataset.s3...samara.png` | Query image for similarity demo |
 
@@ -137,16 +127,18 @@ These are set in `runtimeEnvYAML` inside `rayjob.yaml` and can be overridden the
 
 ### Scaling
 
-The default `rayjob.yaml` uses **1 GPU worker node with 8 GPUs** and 4 CLIP embedding actors. Adjust for your setup:
+The default `rayjob.yaml` uses **2 GPU worker nodes with 8 GPUs each** (16 total) and 16 CLIP embedding actors. Adjust for your setup:
 
 | Node Pool VM SKU | GPUs/Node | Suggested `NUM_GPU_ACTORS` | Worker Replicas |
 |---|---|---|---|
 | `Standard_NC6s_v3` (V100) | 1 | 1 | 1 |
 | `Standard_NC24ads_A100_v4` (A100) | 1 | 1 | 4 |
-| `Standard_ND96asr_v4` (A100 x8) | 8 | 4 | 1 |
-| `gpu-h100-sxm-8gpu` (H100 x8) | 8 | 4 | 1 |
+| `Standard_ND96asr_v4` (A100 x8) | 8 | 8 | 1 |
+| `gpu-h100-sxm-8gpu` (H100 x8) | 8 | 8–16 | 1–2 |
 
 Update the `replicas`, `num-gpus`, and `nvidia.com/gpu` values in `rayjob.yaml` along with the `NUM_GPU_ACTORS` environment variable.
+
+> **Note:** The `runtimeEnvYAML` pip install runs per-actor on each worker node at startup. With large dependencies like `torch` (~2.8 GB), expect a 1–2 minute delay before GPU actors begin processing. To eliminate this delay, bake dependencies into a custom container image.
 
 ## Key Differences from Anyscale Version
 
@@ -154,10 +146,10 @@ Update the `replicas`, `num-gpus`, and `nvidia.com/gpu` values in `rayjob.yaml` 
 |---|---|
 | Notebook runs inside Anyscale Workspace | Script runs on the cluster via RayJob |
 | `accelerator_type="T4"` | Removed — GPU type determined by VM SKU |
-| S3 user storage for artifacts | Azure Blob PVC at `/mnt/cluster_storage` |
+| S3 user storage for Parquet artifacts | Ray object store via `materialize()` (ephemeral) |
 | Anyscale runtime env auto-setup | `runtimeEnvYAML` in RayJob spec |
 | `anyscale job submit` | `kubectl apply -f rayjob.yaml` |
-| `doggos` pip package from GitHub | Self-contained `EmbedImages` class in script |
+| `doggos` pip package pre-installed | `doggos` installed via `runtimeEnvYAML` from GitHub |
 
 ## Cleanup
 
