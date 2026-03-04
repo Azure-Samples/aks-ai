@@ -1,22 +1,16 @@
 # KubeRay: Entity Recognition E2E
 
-## Prerequisites
-
-Set up PVC with blobfuse2:
-
-```bash
-kubectl apply -f configs/storageclass.yaml
-kubectl apply -f configs/pvc.yaml
-```
-
 ## Entity Recognition E2E (Training + Batch Inference)
+
+> **Note:** No shared PVC is required. The script uses Ray object store to
+> distribute dataset and checkpoint files between head and GPU worker nodes.
 
 ### 1. Create the ConfigMap holding the job script
 
 ```bash
 NAMESPACE=ray
-kubectl create configmap entity-recognition-scripts \
-  --from-file=entity_recognition.py \
+kubectl create configmap fine-tune-scripts \
+  --from-file=fine_tune.py \
   -n $NAMESPACE \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
@@ -24,7 +18,7 @@ kubectl create configmap entity-recognition-scripts \
 ### 2. Submit the RayJob (creates its own transient cluster)
 
 ```bash
-kubectl apply -f llm-rayjob.yaml
+kubectl apply -f rayjob.yaml
 ```
 
 ### 3. Wait for the job's pod to be running before streaming logs

@@ -1,10 +1,10 @@
 apiVersion: ray.io/v1
 kind: RayJob
 metadata:
-  name: llm
+  name: distributed-finetuning
   namespace: ray
 spec:
-  entrypoint: python /home/ray/scripts/entity_recognition.py --skip-inference
+  entrypoint: python /home/ray/scripts/fine_tune.py
   runtimeEnvYAML: |
     pip:
       - xgrammar==0.1.11
@@ -15,9 +15,9 @@ spec:
       - IPython
     env_vars:
       HF_HUB_ENABLE_HF_TRANSFER: "1"
+      RAY_TRAIN_V2_ENABLED: "0"
 
   shutdownAfterJobFinishes: false   # keep cluster alive to inspect results
-  # ttlSecondsAfterFinished: 3600     # clean up 1 h after completion
 
   rayClusterSpec:
     rayVersion: "2.53.0"
@@ -30,8 +30,15 @@ spec:
         disable-usage-stats: "true"
       template:
         spec:
-          nodeSelector:
-            agentpool: system
+          affinity:
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                  - matchExpressions:
+                      - key: nodepool
+                        operator: In
+                        values:
+                          - nebius-cpu-nodepool
           containers:
             - name: ray-head
               image: rayproject/ray:2.53.0
@@ -57,18 +64,13 @@ spec:
               volumeMounts:
                 - name: scripts
                   mountPath: /home/ray/scripts
-                - name: cluster-storage
-                  mountPath: /mnt/cluster_storage
           volumes:
             - name: scripts
               configMap:
-                name: entity-recognition-scripts
+                name: fine-tune-scripts
                 items:
-                  - key: entity_recognition.py
-                    path: entity_recognition.py
-            - name: cluster-storage
-              persistentVolumeClaim:
-                claimName: cluster-storage
+                  - key: fine_tune.py
+                    path: fine_tune.py
 
     workerGroupSpecs:
       - groupName: workers
@@ -80,7 +82,15 @@ spec:
           num-cpus: "64"
         template:
           spec:
-            # No init containers needed — workers see the same shared storage
+            affinity:
+              nodeAffinity:
+                requiredDuringSchedulingIgnoredDuringExecution:
+                  nodeSelectorTerms:
+                    - matchExpressions:
+                        - key: node.kubernetes.io/instance-type
+                          operator: In
+                          values:
+                            - gpu-h100-sxm-8gpu-128vcpu-1600gb
             containers:
               - name: ray-worker
                 image: rayproject/ray:2.53.0-gpu
@@ -93,10 +103,3 @@ spec:
                     cpu: "64"
                     memory: "64Gi"
                     nvidia.com/gpu: "4"
-                volumeMounts:
-                  - name: cluster-storage
-                    mountPath: /mnt/cluster_storage
-            volumes:
-              - name: cluster-storage
-                persistentVolumeClaim:
-                  claimName: cluster-storage
