@@ -16,6 +16,9 @@ spec:
         - key: kubernetes.io/os
           operator: In
           values: ["linux"]
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30m
   limits:
     cpu: "1000"
     memory: 10000Gi
