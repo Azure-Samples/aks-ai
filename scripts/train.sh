@@ -15,7 +15,7 @@ if ! helm status kuberay-operator -n $NAMESPACE &>/dev/null; then
 fi
 
 # Clean up existing rayjob
-kubectl -n $NAMESPACE delete rayjob distributed-training
+kubectl -n $NAMESPACE delete rayjob distributed-training --ignore-not-found
 
 
 # Create the ConfigMap holding the job script

@@ -31,6 +31,10 @@ spec:
         disable-usage-stats: "true"
       template:
         spec:
+          tolerations:
+            - key: nebius.com/workload-only
+              operator: Exists
+              effect: NoSchedule
           affinity:
             nodeAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
@@ -85,6 +89,10 @@ spec:
           num-cpus: "64"
         template:
           spec:
+            tolerations:
+              - key: nebius.com/workload-only
+                operator: Exists
+                effect: NoSchedule
             affinity:
               nodeAffinity:
                 requiredDuringSchedulingIgnoredDuringExecution:
