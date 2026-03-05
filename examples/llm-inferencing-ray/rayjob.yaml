@@ -1,0 +1,104 @@
+apiVersion: ray.io/v1
+kind: RayJob
+metadata:
+  name: llm-inferencing-benchmark
+  namespace: ray
+spec:
+  entrypoint: python /home/ray/scripts/benchmark.py
+  runtimeEnvYAML: |
+    pip:
+      - "ray[llm]==2.53.0"
+      - "vllm>=0.12.0,<0.13.0"
+    env_vars:
+      MODEL: "Qwen/Qwen2.5-7B-Instruct"
+      NUM_PROMPTS: "50"
+      MAX_TOKENS: "256"
+      TENSOR_PARALLEL_SIZE: "2"
+      CONCURRENCY: "8"
+
+  shutdownAfterJobFinishes: false # keep cluster alive to inspect results
+
+  rayClusterSpec:
+    rayVersion: "2.53.0"
+    enableInTreeAutoscaling: false
+
+    headGroupSpec:
+      rayStartParams:
+        num-cpus: "0"
+        dashboard-host: "0.0.0.0"
+        disable-usage-stats: "true"
+      template:
+        spec:
+          nodeSelector:
+            agentpool: system
+          containers:
+            - name: ray-head
+              image: rayproject/ray:2.53.0-py312
+              env:
+                - name: RAY_DISABLE_DOCKER_CPU_WARNING
+                  value: "1"
+                - name: RAY_SCHEDULER_EVENTS
+                  value: "0"
+              ports:
+                - containerPort: 6379
+                  name: gcs-server
+                - containerPort: 8265
+                  name: dashboard
+                - containerPort: 10001
+                  name: client
+              resources:
+                limits:
+                  cpu: "4"
+                  memory: "16Gi"
+                requests:
+                  cpu: "4"
+                  memory: "16Gi"
+              volumeMounts:
+                - name: scripts
+                  mountPath: /home/ray/scripts
+          volumes:
+            - name: scripts
+              configMap:
+                name: inference-benchmark-scripts
+                items:
+                  - key: benchmark.py
+                    path: benchmark.py
+
+    workerGroupSpecs:
+      - groupName: workers
+        replicas: 2
+        minReplicas: 2
+        maxReplicas: 2
+        rayStartParams:
+          num-gpus: "8"
+          num-cpus: "64"
+        template:
+          spec:
+            # nodeSelector:
+            #   agentpool: gpu
+            containers:
+              - name: ray-worker
+                image: rayproject/ray:2.53.0-py312-gpu
+                resources:
+                  limits:
+                    cpu: "64"
+                    memory: "64Gi"
+                    nvidia.com/gpu: "8"
+                  requests:
+                    cpu: "64"
+                    memory: "64Gi"
+                    nvidia.com/gpu: "8"
+                volumeMounts:
+                  - name: scripts
+                    mountPath: /home/ray/scripts
+                  - name: hf-cache
+                    mountPath: /root/.cache/huggingface
+            volumes:
+              - name: scripts
+                configMap:
+                  name: inference-benchmark-scripts
+                  items:
+                    - key: benchmark.py
+                      path: benchmark.py
+              - name: hf-cache
+                emptyDir: {}
