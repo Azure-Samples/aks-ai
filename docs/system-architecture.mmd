@@ -8,6 +8,7 @@ graph TB
             AHEAD["Ray Head Pod"]
         end
         subgraph GpuPool["GPU Pool (H100)"]
+            ADRA["DRA Driver"]
             AWORK["Ray Worker Pods"]
         end
         AVPN["VPN Gateway"]
@@ -18,7 +19,8 @@ graph TB
             NHEAD["Ray Head Pod"]
         end
         subgraph NebiusGpuPool["GPU Pool (H100)"]
-            NWORK["Worker Pods"]
+            NDRA["DRA Driver"]
+            NWORK["Ray Worker Pods"]
         end
         NVPN["Gateway Peer"]
     end
@@ -28,10 +30,14 @@ graph TB
     AKS -->|"Kubeadm join"| NebiusGpuPool
 
     %% Flex Karpenter manages node pool lifecycle
-    KARP -->|"Manage lifecycle"| AzureCpuPool
-    KARP -->|"Manage lifecycle"| GpuPool
-    KARP -->|"Manage lifecycle"| NebiusCpuPool
-    KARP -->|"Manage lifecycle"| NebiusGpuPool
+    KARP -->|"Autoscaling"| AzureCpuPool
+    KARP -->|"Autoscaling"| GpuPool
+    KARP -->|"Autoscaling"| NebiusCpuPool
+    KARP -->|"Autoscaling"| NebiusGpuPool
+
+    %% DRA topology-aware GPU scheduling
+    AKS -->|"Topology-aware scheduling"| AWORK
+    AKS -->|"Topology-aware scheduling"| NWORK
 
     %% DNS resolution
     AWORK -->|"DNS resolution"| COREDNS
@@ -50,4 +56,5 @@ graph TB
     class KARP karpenter
     class COREDNS system
     class AHEAD,AWORK,NHEAD,NWORK workload
+    class ADRA,NDRA system
     class AVPN,NVPN gateway
