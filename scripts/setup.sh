@@ -6,7 +6,7 @@ aks-flex-cli config env --nebius > .env
 
 aks-flex-cli network deploy
 
-aks-flex-cli aks deploy --unbounded-cni --gpu-device-plugin
+aks-flex-cli aks deploy --unbounded-cni --dra-driver
 
 aks-flex-cli config unbounded-cni site \
   --name site-remote \
