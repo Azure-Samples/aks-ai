@@ -3,7 +3,7 @@ kind: NebiusNodeClass
 metadata:
   name: nebius
 spec:
-  projectID: "<your-nebius-project-id>"
-  region: "<your-nebius-region>"
-  subnetID: "<your-nebius-subnet-id>"
+  projectID: "project-e00hks1mpr00yvvfrmcvbp"
+  region: "eu-north1"
+  subnetID: "vpcsubnet-e00kh7b88dkz0nbmzv"
   osDiskSizeGB: 128

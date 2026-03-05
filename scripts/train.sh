@@ -1,6 +1,18 @@
 ### Workloads
 
+CLOUD=${1:?Usage: $0 <azure|nebius>}
 NAMESPACE=ray
+
+if [[ "$CLOUD" != "azure" && "$CLOUD" != "nebius" ]]; then
+    echo "Error: CLOUD must be 'azure' or 'nebius', got '$CLOUD'"
+    exit 1
+fi
+
+if [[ "$CLOUD" == "azure" ]]; then
+    RAYJOB_YAML=examples/multimodal-training/rayjob-azure.yaml
+else
+    RAYJOB_YAML=examples/multimodal-training/rayjob-nebius.yaml
+fi
 
 # Install kuberay (skip if already deployed)
 if ! helm status kuberay-operator -n $NAMESPACE &>/dev/null; then
@@ -25,12 +37,10 @@ kubectl create configmap distributed-training-scripts \
 
 
 # Submit the RayJob (creates its own transient cluster)
-kubectl apply -f examples/multimodal-training/rayjob.yaml
+kubectl apply -f "$RAYJOB_YAML"
 
 # Wait for the job's pod to be running before streaming logs
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/created-by=kuberay-operator -n $NAMESPACE  --timeout=300s
 kubectl wait --for=condition=Ready pod -l job-name=distributed-training -n $NAMESPACE --timeout=300s
-kubectl -n $NAMESPACE get pods -o wide
 
 kubectl -n $NAMESPACE logs -f -l job-name=distributed-training --tail=100
-

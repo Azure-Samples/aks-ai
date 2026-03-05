@@ -20,6 +20,22 @@ spec:
 
   shutdownAfterJobFinishes: false   # keep cluster alive to inspect results
 
+  submitterPodTemplate:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ray-job-submitter
+          image: rayproject/ray:2.48.0-py312
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: agentpool
+                    operator: In
+                    values:
+                      - cpu
+
   rayClusterSpec:
     rayVersion: "2.48.0"
     enableInTreeAutoscaling: false
@@ -31,19 +47,15 @@ spec:
         disable-usage-stats: "true"
       template:
         spec:
-          tolerations:
-            - key: nebius.com/workload-only
-              operator: Exists
-              effect: NoSchedule
           affinity:
             nodeAffinity:
               requiredDuringSchedulingIgnoredDuringExecution:
                 nodeSelectorTerms:
                   - matchExpressions:
-                      - key: nodepool
+                      - key: agentpool
                         operator: In
                         values:
-                          - nebius-cpu-nodepool
+                          - cpu
           containers:
             - name: ray-head
               image: rayproject/ray:2.48.0-py312
@@ -90,18 +102,19 @@ spec:
         template:
           spec:
             tolerations:
-              - key: nebius.com/workload-only
-                operator: Exists
+              - key: sku
+                operator: Equal
+                value: gpu
                 effect: NoSchedule
             affinity:
               nodeAffinity:
                 requiredDuringSchedulingIgnoredDuringExecution:
                   nodeSelectorTerms:
                     - matchExpressions:
-                        - key: node.kubernetes.io/instance-type
+                        - key: agentpool
                           operator: In
                           values:
-                            - gpu-h100-sxm-8gpu-128vcpu-1600gb
+                            - gpu
             containers:
               - name: ray-worker
                 image: rayproject/ray:2.48.0-py312-gpu

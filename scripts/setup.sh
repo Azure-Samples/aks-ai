@@ -40,7 +40,7 @@ helm upgrade --install karpenter charts/karpenter \
 
 kubectl create secret generic nebius-credentials \
   --namespace karpenter \
-  --from-file="credentials.json=<path-to-credentials-file>" \
+  --from-file="credentials.json=/home/ansonqian/.nebius/serviceaccount-e00y4ya0mjry9dbtc0-credentials.json" \
   --dry-run=client -o yaml | kubectl apply -f -
 
-kubect apply -f configs/nebius/
+kubectl apply -f configs/nebius/
