@@ -26,8 +26,8 @@ graph TB
     end
 
     %% Control plane to Nebius
-    AKS -->|"Kubeadm join"| NebiusCpuPool
-    AKS -->|"Kubeadm join"| NebiusGpuPool
+    NebiusCpuPool -->|"Kubeadm join"| AKS
+    NebiusGpuPool -->|"Kubeadm join"| AKS
 
     %% Flex Karpenter manages node pool lifecycle
     KARP -->|"Autoscaling"| AzureCpuPool
@@ -38,6 +38,10 @@ graph TB
     %% DRA topology-aware GPU scheduling
     AKS -->|"Topology-aware scheduling"| AWORK
     AKS -->|"Topology-aware scheduling"| NWORK
+
+    %% DRA mounts GPU devices
+    ADRA -->|"Mount GPU devices"| AWORK
+    NDRA -->|"Mount GPU devices"| NWORK
 
     %% DNS resolution
     AWORK -->|"DNS resolution"| COREDNS
@@ -50,11 +54,12 @@ graph TB
     classDef workload fill:#e8731a,stroke:#c55f12,color:#fff
     classDef gateway fill:#d4a017,stroke:#b8860b,color:#fff
     classDef system fill:#2ea44f,stroke:#22863a,color:#fff
+    classDef dra fill:#c44569,stroke:#a13d57,color:#fff
     classDef karpenter fill:#1a9988,stroke:#147a6c,color:#fff
 
     class AKS control
     class KARP karpenter
     class COREDNS system
     class AHEAD,AWORK,NHEAD,NWORK workload
-    class ADRA,NDRA system
+    class ADRA,NDRA dra
     class AVPN,NVPN gateway
