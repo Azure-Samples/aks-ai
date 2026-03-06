@@ -13,7 +13,17 @@ spec:
         group: karpenter.azure.com
         kind: AKSNodeClass
         name: azure
+      startupTaints:
+        - key: nvidia.com/gpu
+          value: "not-ready"
+          effect: NoSchedule
+        - key: node.cilium.io/agent-not-ready
+          value: "true"
+          effect: NoSchedule
       requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
         - key: node.kubernetes.io/instance-type
           operator: In
           values: ["Standard_ND96isr_H100_v5"]

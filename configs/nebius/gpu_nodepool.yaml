@@ -13,6 +13,13 @@ spec:
         group: flex.aks.azure.com
         kind: NebiusNodeClass
         name: nebius
+      startupTaints:
+        - key: nvidia.com/gpu
+          value: "not-ready"
+          effect: NoSchedule
+        - key: node.cilium.io/agent-not-ready
+          value: "true"
+          effect: NoSchedule
       requirements:
         - key: kubernetes.io/os
           operator: In
