@@ -23,16 +23,17 @@ It is adapted from the [Ray E2E Multimodal AI Workloads — Distributed Training
 
 ## Files
 
-| File | Description |
+| Path | Description |
 |---|---|
 | `distributed_training.py` | Training script — runs on the RayCluster |
-| `rayjob.yaml` | RayJob manifest — submits the script and manages the cluster |
-| `doggos/embed.py` | CLIP embedding actor for Ray Data |
+| `base/rayjob.yaml` | Shared RayJob manifest (Kustomize base) |
+| `overlays/azure/` | Azure overlay — DRA GPU allocation, AKS nodepool affinity |
+| `overlays/nebius/` | Nebius overlay — device plugin GPUs, instance-type affinity |
 
 ## Architecture
 
 ```
-kubectl apply -f rayjob.yaml
+kubectl apply -k overlays/azure   # or overlays/nebius
         │
         ▼
 ┌─────────────────────────────────────────────────┐
@@ -73,8 +74,14 @@ kubectl create configmap distributed-training-scripts \
 
 ### 3. Submit the RayJob
 
+Build and apply the provider-specific overlay with Kustomize:
+
 ```bash
-kubectl apply -f rayjob.yaml
+# Azure
+kubectl apply -k overlays/azure
+
+# Nebius
+kubectl apply -k overlays/nebius
 ```
 
 This creates a RayCluster (head + 2 GPU workers), installs pip dependencies via `runtimeEnvYAML`, runs `distributed_training.py`, and keeps the cluster alive for inspection.
@@ -109,7 +116,7 @@ MLflow UI is now available at [http://localhost:8080](http://localhost:8080).
 
 ## Adapting the Scaling Config
 
-The default `rayjob.yaml` is configured for **2 GPU worker nodes with 8 GPUs each** (e.g., `Standard_ND96asr_v4`). Adjust for your setup:
+The default base is configured for **2 GPU worker nodes with 8 GPUs each** (e.g., `Standard_ND96asr_v4`). Adjust for your setup:
 
 | Node Pool VM SKU | GPUs/Node | `NUM_WORKERS` | `resources_per_worker` |
 |---|---|---|---|
@@ -117,7 +124,7 @@ The default `rayjob.yaml` is configured for **2 GPU worker nodes with 8 GPUs eac
 | `Standard_NC24ads_A100_v4` (A100) | 4 | 2 | `{"CPU": 8, "GPU": 4}` |
 | `Standard_ND96asr_v4` (A100 x8) | 8 | 2 | `{"CPU": 8, "GPU": 8}` |
 
-Update both `rayjob.yaml` (worker replicas and GPU limits) and the constants at the top of `distributed_training.py`.
+Update both `base/rayjob.yaml` (worker replicas and GPU limits) and the constants at the top of `distributed_training.py`.
 
 ## Key Differences from Anyscale Version
 
@@ -132,6 +139,11 @@ Update both `rayjob.yaml` (worker replicas and GPU limits) and the constants at 
 ## Cleanup
 
 ```bash
-kubectl delete -f rayjob.yaml
+# Azure
+kubectl delete -k overlays/azure
+
+# Nebius
+kubectl delete -k overlays/nebius
+
 kubectl delete configmap distributed-training-scripts -n ray
 ```

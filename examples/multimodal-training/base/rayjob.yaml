@@ -26,15 +26,6 @@ spec:
       containers:
         - name: ray-job-submitter
           image: rayproject/ray:2.48.0-py312
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: agentpool
-                    operator: In
-                    values:
-                      - cpu
 
   rayClusterSpec:
     rayVersion: "2.48.0"
@@ -47,15 +38,6 @@ spec:
         disable-usage-stats: "true"
       template:
         spec:
-          affinity:
-            nodeAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution:
-                nodeSelectorTerms:
-                  - matchExpressions:
-                      - key: agentpool
-                        operator: In
-                        values:
-                          - cpu
           containers:
             - name: ray-head
               image: rayproject/ray:2.48.0-py312
@@ -101,20 +83,6 @@ spec:
           num-cpus: "64"
         template:
           spec:
-            tolerations:
-              - key: sku
-                operator: Equal
-                value: gpu
-                effect: NoSchedule
-            affinity:
-              nodeAffinity:
-                requiredDuringSchedulingIgnoredDuringExecution:
-                  nodeSelectorTerms:
-                    - matchExpressions:
-                        - key: agentpool
-                          operator: In
-                          values:
-                            - gpu
             resourceClaims:
               - name: gpus
                 resourceClaimTemplateName: gpus
@@ -143,18 +111,3 @@ spec:
                   items:
                     - key: distributed_training.py
                       path: distributed_training.py
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaimTemplate
-metadata:
-  name: gpus
-  namespace: ray
-spec:
-  spec:
-    devices:
-      requests:
-        - name: gpus
-          exactly:
-            deviceClassName: gpu.nvidia.com
-            count: 8
-            allocationMode: ExactCount
