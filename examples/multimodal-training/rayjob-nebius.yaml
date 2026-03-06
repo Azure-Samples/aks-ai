@@ -31,10 +31,10 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: agentpool
+                  - key: nodepool
                     operator: In
                     values:
-                      - cpu
+                      - nebius-cpu-nodepool
                       
   rayClusterSpec:
     rayVersion: "2.48.0"
