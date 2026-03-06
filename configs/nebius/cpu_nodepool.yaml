@@ -16,12 +16,6 @@ spec:
         - key: karpenter.azure.com/sku-cpu
           operator: Gt
           values: ["8"]
-        - key: karpenter.azure.com/sku-gpu-count
-          operator: In
-          values: ["0"]
-  disruption:
-    consolidationPolicy: WhenEmpty
-    consolidateAfter: Never
   limits:
     cpu: "1000"
     memory: 1000Gi

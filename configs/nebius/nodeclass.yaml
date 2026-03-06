@@ -7,3 +7,4 @@ spec:
   region: "eu-north1"
   subnetID: "vpcsubnet-e00kh7b88dkz0nbmzv"
   osDiskSizeGB: 128
+  wireguardPeerCIDR: "100.96.1.0/24"
