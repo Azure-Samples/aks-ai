@@ -134,7 +134,7 @@ class HeadHandler(http.server.BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    server = http.server.HTTPServer((HOST, PORT), HeadHandler)
+    server = http.server.ThreadingHTTPServer((HOST, PORT), HeadHandler)
     print(f"[HEAD] Ray head simulator listening on {HOST}:{PORT}")
     print(f"[HEAD] Object store chunk size: {OBJECT_CHUNK_SIZE / (1024*1024):.0f} MB")
     server.serve_forever()

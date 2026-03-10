@@ -6,7 +6,8 @@ NAMESPACE=default
 echo "=== Deploying ray benchmark workload ==="
 
 # Clean up any previous run
-kubectl delete deployment ray-benchmark-head ray-benchmark-worker --ignore-not-found
+kubectl delete deployment ray-benchmark-head --ignore-not-found
+kubectl delete job ray-benchmark-worker --ignore-not-found
 kubectl delete svc ray-head-svc --ignore-not-found
 kubectl delete configmap ray-benchmark-scripts --ignore-not-found
 
@@ -22,8 +23,8 @@ kubectl apply -f "$SCRIPT_DIR/examples/ray-benchmark/manifests.yaml" -n $NAMESPA
 echo "=== Waiting for head pod to be ready ==="
 kubectl wait --for=condition=Ready pod -l app=ray-benchmark-head -n $NAMESPACE --timeout=300s
 
-echo "=== Waiting for worker pods to be ready ==="
-kubectl wait --for=condition=Ready pod -l app=ray-benchmark-worker -n $NAMESPACE --timeout=600s
+echo "=== Waiting for worker job to complete ==="
+kubectl wait --for=condition=Complete job/ray-benchmark-worker -n $NAMESPACE --timeout=600s
 
-echo "=== Streaming worker logs ==="
-kubectl logs -f -l app=ray-benchmark-worker -n $NAMESPACE --tail=200
+echo "=== Worker logs ==="
+kubectl logs -l app=ray-benchmark-worker -n $NAMESPACE --tail=200

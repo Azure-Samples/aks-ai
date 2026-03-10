@@ -39,6 +39,12 @@ spec:
                     operator: In
                     values:
                       - nebius
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  app: ray-benchmark-worker
+              topologyKey: kubernetes.io/hostname
       containers:
         - name: head
           image: python:3.12-slim
@@ -47,16 +53,16 @@ spec:
             - name: HEAD_PORT
               value: "8265"
             - name: OBJECT_CHUNK_SIZE_MB
-              value: "64"
+              value: "512"
           ports:
             - containerPort: 8265
           resources:
             requests:
               cpu: "500m"
-              memory: "512Mi"
+              memory: "1Gi"
             limits:
               cpu: "2"
-              memory: "1Gi"
+              memory: "2Gi"
           readinessProbe:
             httpGet:
               path: /healthz
@@ -71,21 +77,20 @@ spec:
           configMap:
             name: ray-benchmark-scripts
 ---
-# Worker Deployment: runs on GPU node pool (mimics Ray workers)
-apiVersion: apps/v1
-kind: Deployment
+# Worker Job: runs on GPU node pool (mimics Ray workers), run-to-completion
+apiVersion: batch/v1
+kind: Job
 metadata:
   name: ray-benchmark-worker
 spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: ray-benchmark-worker
+  completions: 2
+  parallelism: 2
   template:
     metadata:
       labels:
         app: ray-benchmark-worker
     spec:
+      restartPolicy: Never
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -105,17 +110,17 @@ spec:
             - name: HEAD_PORT
               value: "8265"
             - name: OBJECT_CHUNK_SIZE_MB
-              value: "64"
+              value: "512"
             - name: NUM_THROUGHPUT_ROUNDS
-              value: "5"
+              value: "10"
           resources:
             requests:
               cpu: "500m"
-              memory: "512Mi"
+              memory: "1Gi"
               nvidia.com/gpu: "1"
             limits:
               cpu: "2"
-              memory: "1Gi"
+              memory: "2Gi"
               nvidia.com/gpu: "1"
           volumeMounts:
             - name: scripts

@@ -138,13 +138,33 @@ def phase_object_store_throughput():
 
     chunk_bytes = OBJECT_CHUNK_SIZE_MB * 1024 * 1024
 
-    # --- READ throughput ---
+    # --- Latency test (small 1-byte reads to measure round-trip) ---
+    log("  --- Latency (small request round-trip) ---")
+    rt_latencies = []
+    for i in range(20):
+        url = f"http://{HEAD_SERVICE}:{HEAD_PORT}/healthz"
+        req = urllib.request.Request(url)
+        start = time.monotonic()
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            resp.read()
+        rt_latencies.append((time.monotonic() - start) * 1000)
+    avg_rt = sum(rt_latencies) / len(rt_latencies)
+    p50 = sorted(rt_latencies)[len(rt_latencies) // 2]
+    p99 = sorted(rt_latencies)[int(len(rt_latencies) * 0.99)]
+    log(f"  RTT (20 reqs): avg={avg_rt:.2f} ms  p50={p50:.2f} ms  "
+        f"p99={p99:.2f} ms  min={min(rt_latencies):.2f} ms  "
+        f"max={max(rt_latencies):.2f} ms")
+
+    # --- READ throughput + latency ---
+    log("  --- READ ---")
     read_rates = []
+    read_ttfb = []
     for i in range(1, NUM_THROUGHPUT_ROUNDS + 1):
         url = f"http://{HEAD_SERVICE}:{HEAD_PORT}/api/object_store/read"
         req = urllib.request.Request(url)
         start = time.monotonic()
         with urllib.request.urlopen(req, timeout=120) as resp:
+            ttfb = (time.monotonic() - start) * 1000
             expected_checksum = resp.headers.get("X-Checksum")
             data = resp.read()
         elapsed = time.monotonic() - start
@@ -152,17 +172,23 @@ def phase_object_store_throughput():
         mb = len(data) / (1024 * 1024)
         rate = mb / elapsed
         read_rates.append(rate)
+        read_ttfb.append(ttfb)
         integrity = "OK" if actual_checksum == expected_checksum else "MISMATCH"
         log(f"  READ  round {i}/{NUM_THROUGHPUT_ROUNDS}: "
             f"{mb:.0f} MB in {elapsed:.3f}s = {rate:.1f} MB/s  "
-            f"checksum={integrity}")
+            f"TTFB={ttfb:.1f} ms  checksum={integrity}")
 
     avg_read = sum(read_rates) / len(read_rates)
-    log(f"  READ  avg={avg_read:.1f} MB/s  "
+    avg_ttfb_r = sum(read_ttfb) / len(read_ttfb)
+    log(f"  READ  throughput: avg={avg_read:.1f} MB/s  "
         f"min={min(read_rates):.1f}  max={max(read_rates):.1f}")
+    log(f"  READ  TTFB:       avg={avg_ttfb_r:.1f} ms  "
+        f"min={min(read_ttfb):.1f}  max={max(read_ttfb):.1f}")
 
-    # --- WRITE throughput ---
+    # --- WRITE throughput + latency ---
+    log("  --- WRITE ---")
     write_rates = []
+    write_latencies = []
     payload = os.urandom(chunk_bytes)
     payload_checksum = hashlib.sha256(payload).hexdigest()
     for i in range(1, NUM_THROUGHPUT_ROUNDS + 1):
@@ -173,19 +199,24 @@ def phase_object_store_throughput():
         with urllib.request.urlopen(req, timeout=120) as resp:
             result = json.loads(resp.read())
         elapsed = time.monotonic() - start
+        elapsed_ms = elapsed * 1000
         mb = chunk_bytes / (1024 * 1024)
         rate = mb / elapsed
         write_rates.append(rate)
+        write_latencies.append(elapsed_ms)
         integrity = "OK" if result["checksum"] == payload_checksum else "MISMATCH"
         log(f"  WRITE round {i}/{NUM_THROUGHPUT_ROUNDS}: "
             f"{mb:.0f} MB in {elapsed:.3f}s = {rate:.1f} MB/s  "
-            f"checksum={integrity}")
+            f"latency={elapsed_ms:.0f} ms  checksum={integrity}")
 
     avg_write = sum(write_rates) / len(write_rates)
-    log(f"  WRITE avg={avg_write:.1f} MB/s  "
+    avg_lat_w = sum(write_latencies) / len(write_latencies)
+    log(f"  WRITE throughput: avg={avg_write:.1f} MB/s  "
         f"min={min(write_rates):.1f}  max={max(write_rates):.1f}")
+    log(f"  WRITE latency:    avg={avg_lat_w:.0f} ms  "
+        f"min={min(write_latencies):.0f}  max={max(write_latencies):.0f}")
 
-    return avg_read, avg_write
+    return avg_read, avg_write, avg_rt
 
 
 def main():
@@ -199,7 +230,7 @@ def main():
 
     phase_dns_resolution()
     phase_job_metadata()
-    avg_read, avg_write = phase_object_store_throughput()
+    avg_read, avg_write, avg_rt = phase_object_store_throughput()
 
     # Final summary
     log("=" * 60)
@@ -207,6 +238,7 @@ def main():
     log("=" * 60)
     log(f"  DNS resolution:     PASS")
     log(f"  Job metadata HTTP:  PASS")
+    log(f"  Object store RTT:   {avg_rt:.2f} ms avg")
     log(f"  Object store READ:  {avg_read:.1f} MB/s avg")
     log(f"  Object store WRITE: {avg_write:.1f} MB/s avg")
 
