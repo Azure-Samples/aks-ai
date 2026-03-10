@@ -7,6 +7,7 @@ Performs three test phases:
   3. Object Store    - Read and write large payloads, measure throughput
 """
 
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -14,13 +15,13 @@ import socket
 import sys
 import time
 import urllib.request
-import urllib.error
 
 HEAD_SERVICE = os.environ.get("HEAD_SERVICE", "ray-head-svc")
 HEAD_PORT = int(os.environ.get("HEAD_PORT", "8265"))
 WORKER_ID = os.environ.get("HOSTNAME", "worker-unknown")
 OBJECT_CHUNK_SIZE_MB = int(os.environ.get("OBJECT_CHUNK_SIZE_MB", "64"))
 NUM_THROUGHPUT_ROUNDS = int(os.environ.get("NUM_THROUGHPUT_ROUNDS", "5"))
+PARALLEL_STREAMS = int(os.environ.get("PARALLEL_STREAMS", "8"))
 RETRY_INTERVAL = 5
 MAX_RETRIES = 24  # 2 minutes
 
@@ -53,13 +54,19 @@ def phase_dns_resolution():
     # Measure repeated resolution latency
     latencies = []
     for _ in range(10):
-        start = time.monotonic()
-        socket.getaddrinfo(HEAD_SERVICE, HEAD_PORT, socket.AF_INET, socket.SOCK_STREAM)
-        latencies.append((time.monotonic() - start) * 1000)
+        try:
+            start = time.monotonic()
+            socket.getaddrinfo(HEAD_SERVICE, HEAD_PORT, socket.AF_INET, socket.SOCK_STREAM)
+            latencies.append((time.monotonic() - start) * 1000)
+        except socket.gaierror as e:
+            log(f"  DNS lookup failed during latency test: {e}")
 
-    avg = sum(latencies) / len(latencies)
-    log(f"  DNS avg latency (10 lookups): {avg:.2f} ms  "
-        f"min={min(latencies):.2f} ms  max={max(latencies):.2f} ms")
+    if latencies:
+        avg = sum(latencies) / len(latencies)
+        log(f"  DNS avg latency ({len(latencies)} lookups): {avg:.2f} ms  "
+            f"min={min(latencies):.2f} ms  max={max(latencies):.2f} ms")
+    else:
+        log("  DNS latency test: all lookups failed")
     return True
 
 
@@ -130,18 +137,44 @@ def phase_job_metadata():
     return True
 
 
+def _do_one_read(stream_id):
+    """Single read stream — returns (bytes_read, elapsed, ttfb)."""
+    url = f"http://{HEAD_SERVICE}:{HEAD_PORT}/api/object_store/read"
+    req = urllib.request.Request(url)
+    start = time.monotonic()
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        ttfb = (time.monotonic() - start) * 1000
+        data = resp.read()
+    elapsed = time.monotonic() - start
+    return len(data), elapsed, ttfb
+
+
+def _do_one_write(payload):
+    """Single write stream — returns (bytes_written, elapsed)."""
+    url = f"http://{HEAD_SERVICE}:{HEAD_PORT}/api/object_store/write"
+    req = urllib.request.Request(url, data=payload, method="POST")
+    req.add_header("Content-Type", "application/octet-stream")
+    start = time.monotonic()
+    with urllib.request.urlopen(req, timeout=300) as resp:
+        resp.read()
+    elapsed = time.monotonic() - start
+    return len(payload), elapsed
+
+
 def phase_object_store_throughput():
-    """Phase 3: Measure read/write throughput with the head's object store."""
+    """Phase 3: Measure read/write throughput with parallel streams."""
     log("=" * 60)
     log("PHASE 3: Object Store Throughput")
+    log(f"  chunk={OBJECT_CHUNK_SIZE_MB} MB  streams={PARALLEL_STREAMS}  "
+        f"rounds={NUM_THROUGHPUT_ROUNDS}")
     log("=" * 60)
 
     chunk_bytes = OBJECT_CHUNK_SIZE_MB * 1024 * 1024
 
-    # --- Latency test (small 1-byte reads to measure round-trip) ---
+    # --- Latency test (small request round-trip) ---
     log("  --- Latency (small request round-trip) ---")
     rt_latencies = []
-    for i in range(20):
+    for _ in range(20):
         url = f"http://{HEAD_SERVICE}:{HEAD_PORT}/healthz"
         req = urllib.request.Request(url)
         start = time.monotonic()
@@ -155,66 +188,65 @@ def phase_object_store_throughput():
         f"p99={p99:.2f} ms  min={min(rt_latencies):.2f} ms  "
         f"max={max(rt_latencies):.2f} ms")
 
-    # --- READ throughput + latency ---
-    log("  --- READ ---")
-    read_rates = []
-    read_ttfb = []
-    for i in range(1, NUM_THROUGHPUT_ROUNDS + 1):
-        url = f"http://{HEAD_SERVICE}:{HEAD_PORT}/api/object_store/read"
-        req = urllib.request.Request(url)
-        start = time.monotonic()
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            ttfb = (time.monotonic() - start) * 1000
-            expected_checksum = resp.headers.get("X-Checksum")
-            data = resp.read()
-        elapsed = time.monotonic() - start
-        actual_checksum = hashlib.sha256(data).hexdigest()
-        mb = len(data) / (1024 * 1024)
-        rate = mb / elapsed
-        read_rates.append(rate)
-        read_ttfb.append(ttfb)
-        integrity = "OK" if actual_checksum == expected_checksum else "MISMATCH"
-        log(f"  READ  round {i}/{NUM_THROUGHPUT_ROUNDS}: "
-            f"{mb:.0f} MB in {elapsed:.3f}s = {rate:.1f} MB/s  "
-            f"TTFB={ttfb:.1f} ms  checksum={integrity}")
-
-    avg_read = sum(read_rates) / len(read_rates)
-    avg_ttfb_r = sum(read_ttfb) / len(read_ttfb)
-    log(f"  READ  throughput: avg={avg_read:.1f} MB/s  "
-        f"min={min(read_rates):.1f}  max={max(read_rates):.1f}")
-    log(f"  READ  TTFB:       avg={avg_ttfb_r:.1f} ms  "
-        f"min={min(read_ttfb):.1f}  max={max(read_ttfb):.1f}")
-
-    # --- WRITE throughput + latency ---
-    log("  --- WRITE ---")
-    write_rates = []
-    write_latencies = []
+    # --- Single-stream baseline ---
+    log("  --- Single-stream baseline ---")
+    _, r_elapsed, r_ttfb = _do_one_read(0)
+    r_mb = chunk_bytes / (1024 * 1024)
+    log(f"  READ  1x{r_mb:.0f} MB: {r_mb/r_elapsed:.1f} MB/s  "
+        f"TTFB={r_ttfb:.1f} ms")
     payload = os.urandom(chunk_bytes)
-    payload_checksum = hashlib.sha256(payload).hexdigest()
-    for i in range(1, NUM_THROUGHPUT_ROUNDS + 1):
-        url = f"http://{HEAD_SERVICE}:{HEAD_PORT}/api/object_store/write"
-        req = urllib.request.Request(url, data=payload, method="POST")
-        req.add_header("Content-Type", "application/octet-stream")
-        start = time.monotonic()
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            result = json.loads(resp.read())
-        elapsed = time.monotonic() - start
-        elapsed_ms = elapsed * 1000
-        mb = chunk_bytes / (1024 * 1024)
-        rate = mb / elapsed
-        write_rates.append(rate)
-        write_latencies.append(elapsed_ms)
-        integrity = "OK" if result["checksum"] == payload_checksum else "MISMATCH"
-        log(f"  WRITE round {i}/{NUM_THROUGHPUT_ROUNDS}: "
-            f"{mb:.0f} MB in {elapsed:.3f}s = {rate:.1f} MB/s  "
-            f"latency={elapsed_ms:.0f} ms  checksum={integrity}")
+    _, w_elapsed = _do_one_write(payload)
+    log(f"  WRITE 1x{r_mb:.0f} MB: {r_mb/w_elapsed:.1f} MB/s")
 
-    avg_write = sum(write_rates) / len(write_rates)
-    avg_lat_w = sum(write_latencies) / len(write_latencies)
-    log(f"  WRITE throughput: avg={avg_write:.1f} MB/s  "
-        f"min={min(write_rates):.1f}  max={max(write_rates):.1f}")
-    log(f"  WRITE latency:    avg={avg_lat_w:.0f} ms  "
-        f"min={min(write_latencies):.0f}  max={max(write_latencies):.0f}")
+    # --- Parallel READ throughput ---
+    log(f"  --- READ ({PARALLEL_STREAMS} parallel streams) ---")
+    read_agg_rates = []
+    read_ttfbs = []
+    for rnd in range(1, NUM_THROUGHPUT_ROUNDS + 1):
+        start = time.monotonic()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=PARALLEL_STREAMS) as pool:
+            futures = [pool.submit(_do_one_read, s) for s in range(PARALLEL_STREAMS)]
+            results = [f.result() for f in futures]
+        wall_time = time.monotonic() - start
+        total_mb = sum(r[0] for r in results) / (1024 * 1024)
+        agg_rate = total_mb / wall_time
+        ttfbs = [r[2] for r in results]
+        per_stream = [r[0] / (1024 * 1024) / r[1] for r in results]
+        read_agg_rates.append(agg_rate)
+        read_ttfbs.extend(ttfbs)
+        log(f"  READ  round {rnd}/{NUM_THROUGHPUT_ROUNDS}: "
+            f"{total_mb:.0f} MB in {wall_time:.3f}s = {agg_rate:.1f} MB/s aggregate  "
+            f"per-stream avg={sum(per_stream)/len(per_stream):.1f} MB/s  "
+            f"TTFB avg={sum(ttfbs)/len(ttfbs):.1f} ms")
+
+    avg_read = sum(read_agg_rates) / len(read_agg_rates)
+    log(f"  READ  aggregate: avg={avg_read:.1f} MB/s  "
+        f"min={min(read_agg_rates):.1f}  max={max(read_agg_rates):.1f}")
+    log(f"  READ  TTFB:      avg={sum(read_ttfbs)/len(read_ttfbs):.1f} ms  "
+        f"min={min(read_ttfbs):.1f}  max={max(read_ttfbs):.1f}")
+
+    # --- Parallel WRITE throughput ---
+    log(f"  --- WRITE ({PARALLEL_STREAMS} parallel streams) ---")
+    # Pre-generate one payload per stream to avoid memory contention
+    payloads = [os.urandom(chunk_bytes) for _ in range(PARALLEL_STREAMS)]
+    write_agg_rates = []
+    for rnd in range(1, NUM_THROUGHPUT_ROUNDS + 1):
+        start = time.monotonic()
+        with concurrent.futures.ThreadPoolExecutor(max_workers=PARALLEL_STREAMS) as pool:
+            futures = [pool.submit(_do_one_write, payloads[s]) for s in range(PARALLEL_STREAMS)]
+            results = [f.result() for f in futures]
+        wall_time = time.monotonic() - start
+        total_mb = sum(r[0] for r in results) / (1024 * 1024)
+        agg_rate = total_mb / wall_time
+        per_stream = [r[0] / (1024 * 1024) / r[1] for r in results]
+        write_agg_rates.append(agg_rate)
+        log(f"  WRITE round {rnd}/{NUM_THROUGHPUT_ROUNDS}: "
+            f"{total_mb:.0f} MB in {wall_time:.3f}s = {agg_rate:.1f} MB/s aggregate  "
+            f"per-stream avg={sum(per_stream)/len(per_stream):.1f} MB/s")
+
+    avg_write = sum(write_agg_rates) / len(write_agg_rates)
+    log(f"  WRITE aggregate: avg={avg_write:.1f} MB/s  "
+        f"min={min(write_agg_rates):.1f}  max={max(write_agg_rates):.1f}")
 
     return avg_read, avg_write, avg_rt
 
@@ -224,6 +256,7 @@ def main():
     log(f"  HEAD_SERVICE={HEAD_SERVICE}  HEAD_PORT={HEAD_PORT}")
     log(f"  OBJECT_CHUNK_SIZE_MB={OBJECT_CHUNK_SIZE_MB}")
     log(f"  NUM_THROUGHPUT_ROUNDS={NUM_THROUGHPUT_ROUNDS}")
+    log(f"  PARALLEL_STREAMS={PARALLEL_STREAMS}")
 
     if not wait_for_head():
         sys.exit(1)

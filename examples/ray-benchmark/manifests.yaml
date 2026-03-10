@@ -53,16 +53,16 @@ spec:
             - name: HEAD_PORT
               value: "8265"
             - name: OBJECT_CHUNK_SIZE_MB
-              value: "512"
+              value: "1024"
           ports:
             - containerPort: 8265
           resources:
             requests:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: "8"
+              memory: "16Gi"
             limits:
-              cpu: "2"
-              memory: "2Gi"
+              cpu: "16"
+              memory: "32Gi"
           readinessProbe:
             httpGet:
               path: /healthz
@@ -110,17 +110,19 @@ spec:
             - name: HEAD_PORT
               value: "8265"
             - name: OBJECT_CHUNK_SIZE_MB
-              value: "512"
+              value: "1024"
             - name: NUM_THROUGHPUT_ROUNDS
               value: "10"
+            - name: PARALLEL_STREAMS
+              value: "8"
           resources:
             requests:
-              cpu: "500m"
-              memory: "1Gi"
+              cpu: "8"
+              memory: "16Gi"
               nvidia.com/gpu: "1"
             limits:
-              cpu: "2"
-              memory: "2Gi"
+              cpu: "16"
+              memory: "32Gi"
               nvidia.com/gpu: "1"
           volumeMounts:
             - name: scripts
