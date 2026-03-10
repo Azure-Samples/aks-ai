@@ -19,6 +19,22 @@ spec:
 
   shutdownAfterJobFinishes: false   # keep cluster alive to inspect results
 
+  submitterPodTemplate:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ray-job-submitter
+          image: rayproject/ray:2.53.0
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: agentpool
+                    operator: In
+                    values:
+                      - cpu
+
   rayClusterSpec:
     rayVersion: "2.53.0"
     enableInTreeAutoscaling: false
@@ -35,10 +51,10 @@ spec:
               requiredDuringSchedulingIgnoredDuringExecution:
                 nodeSelectorTerms:
                   - matchExpressions:
-                      - key: nodepool
+                      - key: agentpool
                         operator: In
                         values:
-                          - nebius-cpu-nodepool
+                          - cpu
           containers:
             - name: ray-head
               image: rayproject/ray:2.53.0
@@ -87,19 +103,47 @@ spec:
                 requiredDuringSchedulingIgnoredDuringExecution:
                   nodeSelectorTerms:
                     - matchExpressions:
-                        - key: node.kubernetes.io/instance-type
+                        - key: nvidia.com/gpu.present
                           operator: In
                           values:
-                            - gpu-h100-sxm-8gpu-128vcpu-1600gb
+                            - "true"
+            resourceClaims:
+              - name: gpus
+                resourceClaimTemplateName: gpus
             containers:
               - name: ray-worker
                 image: rayproject/ray:2.53.0-gpu
                 resources:
+                  claims:
+                    - name: gpus
                   limits:
                     cpu: "64"
                     memory: "64Gi"
-                    nvidia.com/gpu: "4"
                   requests:
                     cpu: "64"
                     memory: "64Gi"
-                    nvidia.com/gpu: "4"
+                volumeMounts:
+                  - name: scripts
+                    mountPath: /home/ray/scripts
+            volumes:
+              - name: scripts
+                configMap:
+                  name: fine-tune-scripts
+                  items:
+                    - key: fine_tune.py
+                      path: fine_tune.py
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: gpus
+  namespace: ray
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpus
+          exactly:
+            deviceClassName: gpu.nvidia.com
+            count: 4
+            allocationMode: ExactCount
