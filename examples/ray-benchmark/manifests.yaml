@@ -1,0 +1,126 @@
+---
+# Service: exposes head pod for DNS-based discovery by workers
+apiVersion: v1
+kind: Service
+metadata:
+  name: ray-head-svc
+  labels:
+    app: ray-benchmark-head
+spec:
+  selector:
+    app: ray-benchmark-head
+  ports:
+    - name: http
+      port: 8265
+      targetPort: 8265
+      protocol: TCP
+---
+# Head Deployment: runs on CPU node pool (mimics Ray head)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ray-benchmark-head
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ray-benchmark-head
+  template:
+    metadata:
+      labels:
+        app: ray-benchmark-head
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: unbounded.aks.azure.com/site
+                    operator: In
+                    values:
+                      - nebius
+      containers:
+        - name: head
+          image: python:3.12-slim
+          command: ["python", "/scripts/head_server.py"]
+          env:
+            - name: HEAD_PORT
+              value: "8265"
+            - name: OBJECT_CHUNK_SIZE_MB
+              value: "64"
+          ports:
+            - containerPort: 8265
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8265
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: ray-benchmark-scripts
+---
+# Worker Deployment: runs on GPU node pool (mimics Ray workers)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ray-benchmark-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ray-benchmark-worker
+  template:
+    metadata:
+      labels:
+        app: ray-benchmark-worker
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: unbounded.aks.azure.com/site
+                    operator: In
+                    values:
+                      - nebius
+      containers:
+        - name: worker
+          image: python:3.12-slim
+          command: ["python", "/scripts/worker_client.py"]
+          env:
+            - name: HEAD_SERVICE
+              value: "ray-head-svc"
+            - name: HEAD_PORT
+              value: "8265"
+            - name: OBJECT_CHUNK_SIZE_MB
+              value: "64"
+            - name: NUM_THROUGHPUT_ROUNDS
+              value: "5"
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+              nvidia.com/gpu: "1"
+            limits:
+              cpu: "2"
+              memory: "1Gi"
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: ray-benchmark-scripts
