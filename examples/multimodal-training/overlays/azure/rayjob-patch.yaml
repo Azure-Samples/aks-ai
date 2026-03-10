@@ -1,0 +1,41 @@
+# Azure-specific patches: Karpenter nodepool affinity and GPU tolerations
+- op: add
+  path: /spec/submitterPodTemplate/spec/affinity
+  value:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: karpenter.sh/nodepool
+                operator: In
+                values:
+                  - azure-cpu-nodepool
+- op: add
+  path: /spec/rayClusterSpec/headGroupSpec/template/spec/affinity
+  value:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: karpenter.sh/nodepool
+                operator: In
+                values:
+                  - azure-cpu-nodepool
+- op: add
+  path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/tolerations
+  value:
+    - key: sku
+      operator: Equal
+      value: gpu
+      effect: NoSchedule
+- op: add
+  path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/affinity
+  value:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: karpenter.sh/nodepool
+                operator: In
+                values:
+                  - azure-gpu-nodepool

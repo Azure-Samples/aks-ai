@@ -1,0 +1,34 @@
+# Nebius-specific patches: Karpenter nodepool affinity
+- op: add
+  path: /spec/submitterPodTemplate/spec/affinity
+  value:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: nodepool
+                operator: In
+                values:
+                  - nebius-cpu-nodepool
+- op: add
+  path: /spec/rayClusterSpec/headGroupSpec/template/spec/affinity
+  value:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: nodepool
+                operator: In
+                values:
+                  - nebius-cpu-nodepool
+- op: add
+  path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/affinity
+  value:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: nodepool
+                operator: In
+                values:
+                  - nebius-gpu-nodepool
