@@ -17,14 +17,10 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
               - matchExpressions:
-                  - key: kubernetes.azure.com/mode
-                    operator: NotIn
-                    values:
-                      - system
-                  - key: node.kubernetes.io/instance-type
+                  - key: nodepool
                     operator: In
                     values:
-                      - gpu-h100-sxm-8gpu-128vcpu-1600gb
+                      - nebius-gpu-nodepool
       containers:
         - name: gpu-container
           image: nvidia/cuda:12.4.0-base-ubuntu22.04
@@ -33,8 +29,8 @@ spec:
             requests:
               memory: "512Mi"
               cpu: "250m"
-              nvidia.com/gpu: "4"
+              nvidia.com/gpu: "1"
             limits:
               memory: "1Gi"
               cpu: "500m"
-              nvidia.com/gpu: "4"
+              nvidia.com/gpu: "1"

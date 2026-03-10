@@ -21,9 +21,10 @@ spec:
           value: "true"
           effect: NoSchedule
       requirements:
-        - key: kubernetes.io/os
+        - key: node.kubernetes.io/instance-type
           operator: In
-          values: ["linux"]
+          values:
+            - gpu-h100-sxm-1gpu-16vcpu-200gb
   limits:
     cpu: "1000"
     memory: 10000Gi

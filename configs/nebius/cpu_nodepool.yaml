@@ -13,9 +13,10 @@ spec:
         kind: NebiusNodeClass
         name: nebius
       requirements:
-        - key: karpenter.azure.com/sku-cpu
-          operator: Gt
-          values: ["8"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values:
+            - cpu-d3-32vcpu-128gb
   limits:
     cpu: "1000"
     memory: 1000Gi
