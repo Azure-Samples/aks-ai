@@ -4,20 +4,27 @@ set -eo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-### Inference Benchmark
-
+CLOUD=${1:?Usage: $0 <azure|nebius>}
 NAMESPACE=ray
 
+if [[ "$CLOUD" != "azure" && "$CLOUD" != "nebius" ]]; then
+    echo "Error: CLOUD must be 'azure' or 'nebius', got '$CLOUD'"
+    exit 1
+fi
+
+OVERLAY_DIR="$SCRIPT_DIR/overlays/$CLOUD"
+
 # Clean up existing job
+kubectl -n $NAMESPACE delete configmap multimodel-batch-inference-scripts --ignore-not-found
 kubectl -n $NAMESPACE delete rayjob multimodel-batch-inference --ignore-not-found
 
-# Create the ConfigMap from the actual script file
+# Create the ConfigMap holding the job script
 kubectl create configmap multimodel-batch-inference-scripts \
     --from-file="$SCRIPT_DIR/main.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
-# Submit the Job
-kubectl apply -f "$SCRIPT_DIR/rayjob.yaml"
+# Apply the kustomize overlay (RayJob)
+kubectl apply -k "$OVERLAY_DIR"
 
 # Wait for the pod to be running
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/created-by=kuberay-operator -n $NAMESPACE  --timeout=300s

@@ -13,10 +13,17 @@ spec:
       MODEL: "Qwen/Qwen2.5-7B-Instruct"
       NUM_PROMPTS: "50"
       MAX_TOKENS: "256"
-      TENSOR_PARALLEL_SIZE: "2"
-      CONCURRENCY: "8"
+      TENSOR_PARALLEL_SIZE: "1"
+      CONCURRENCY: "1"
 
   shutdownAfterJobFinishes: false # keep cluster alive to inspect results
+
+  submitterPodTemplate:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ray-job-submitter
+          image: rayproject/ray:2.53.0-py312
 
   rayClusterSpec:
     rayVersion: "2.53.0"
@@ -29,8 +36,6 @@ spec:
         disable-usage-stats: "true"
       template:
         spec:
-          nodeSelector:
-            agentpool: system
           containers:
             - name: ray-head
               image: rayproject/ray:2.53.0-py312
@@ -65,29 +70,27 @@ spec:
                     path: main.py
 
     workerGroupSpecs:
-      - groupName: workers
+      - groupName: gpu-workers
         replicas: 2
         minReplicas: 2
         maxReplicas: 2
         rayStartParams:
-          num-gpus: "8"
-          num-cpus: "64"
+          num-gpus: "1"
+          num-cpus: "8"
         template:
           spec:
-            # nodeSelector:
-            #   agentpool: gpu
             containers:
               - name: ray-worker
                 image: rayproject/ray:2.53.0-py312-gpu
                 resources:
                   limits:
-                    cpu: "64"
-                    memory: "64Gi"
-                    nvidia.com/gpu: "8"
+                    cpu: "8"
+                    memory: "16Gi"
+                    nvidia.com/gpu: "1"
                   requests:
-                    cpu: "64"
-                    memory: "64Gi"
-                    nvidia.com/gpu: "8"
+                    cpu: "8"
+                    memory: "16Gi"
+                    nvidia.com/gpu: "1"
                 volumeMounts:
                   - name: scripts
                     mountPath: /home/ray/scripts

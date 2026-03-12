@@ -21,6 +21,13 @@ spec:
 
   shutdownAfterJobFinishes: false   # keep cluster alive to inspect results
 
+  submitterPodTemplate:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: ray-job-submitter
+          image: rayproject/ray:2.48.0-py312
+
   rayClusterSpec:
     rayVersion: "2.48.0"
     enableInTreeAutoscaling: false
@@ -32,17 +39,6 @@ spec:
         disable-usage-stats: "true"
       template:
         spec:
-          nodeSelector:
-            agentpool: system
-          # affinity:
-          #   nodeAffinity:
-          #     requiredDuringSchedulingIgnoredDuringExecution:
-          #       nodeSelectorTerms:
-          #         - matchExpressions:
-          #             - key: nodepool
-          #               operator: In
-          #               values:
-          #                 - nebius-cpu-nodepool
           containers:
             - name: ray-head
               image: rayproject/ray:2.48.0-py312
@@ -86,15 +82,6 @@ spec:
           num-cpus: "8"
         template:
           spec:
-            # affinity:
-            #   nodeAffinity:
-            #     requiredDuringSchedulingIgnoredDuringExecution:
-            #       nodeSelectorTerms:
-            #         - matchExpressions:
-            #             - key: node.kubernetes.io/instance-type
-            #               operator: In
-            #               values:
-            #                 - gpu-h100-sxm-8gpu-128vcpu-1600gb
             containers:
               - name: ray-worker
                 image: rayproject/ray:2.48.0-py312-gpu

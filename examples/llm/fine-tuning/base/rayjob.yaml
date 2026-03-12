@@ -25,15 +25,6 @@ spec:
       containers:
         - name: ray-job-submitter
           image: rayproject/ray:2.53.0
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-              - matchExpressions:
-                  - key: agentpool
-                    operator: In
-                    values:
-                      - cpu
 
   rayClusterSpec:
     rayVersion: "2.53.0"
@@ -46,15 +37,6 @@ spec:
         disable-usage-stats: "true"
       template:
         spec:
-          affinity:
-            nodeAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution:
-                nodeSelectorTerms:
-                  - matchExpressions:
-                      - key: agentpool
-                        operator: In
-                        values:
-                          - cpu
           containers:
             - name: ray-head
               image: rayproject/ray:2.53.0
@@ -94,34 +76,22 @@ spec:
         minReplicas: 2
         maxReplicas: 4
         rayStartParams:
-          num-gpus: "4"
+          num-gpus: "8"
           num-cpus: "64"
         template:
           spec:
-            affinity:
-              nodeAffinity:
-                requiredDuringSchedulingIgnoredDuringExecution:
-                  nodeSelectorTerms:
-                    - matchExpressions:
-                        - key: nvidia.com/gpu.present
-                          operator: In
-                          values:
-                            - "true"
-            resourceClaims:
-              - name: gpus
-                resourceClaimTemplateName: gpus
             containers:
               - name: ray-worker
                 image: rayproject/ray:2.53.0-gpu
                 resources:
-                  claims:
-                    - name: gpus
                   limits:
                     cpu: "64"
                     memory: "64Gi"
+                    nvidia.com/gpu: "8"
                   requests:
                     cpu: "64"
                     memory: "64Gi"
+                    nvidia.com/gpu: "8"
                 volumeMounts:
                   - name: scripts
                     mountPath: /home/ray/scripts
