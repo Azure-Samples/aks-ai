@@ -1,7 +1,7 @@
 apiVersion: ray.io/v1
 kind: RayJob
 metadata:
-  name: batch-inference
+  name: multimodel-batch-inference
   namespace: ray
 spec:
   entrypoint: python /home/ray/scripts/batch_inference.py
@@ -71,7 +71,7 @@ spec:
           volumes:
             - name: scripts
               configMap:
-                name: batch-inference-scripts
+                name: multimodel-batch-inference-scripts
                 items:
                   - key: batch_inference.py
                     path: batch_inference.py
@@ -113,7 +113,7 @@ spec:
             volumes:
               - name: scripts
                 configMap:
-                  name: batch-inference-scripts
+                  name: multimodel-batch-inference-scripts
                   items:
                     - key: batch_inference.py
                       path: batch_inference.py

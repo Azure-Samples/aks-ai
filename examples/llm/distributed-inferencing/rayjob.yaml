@@ -1,7 +1,7 @@
 apiVersion: ray.io/v1
 kind: RayJob
 metadata:
-  name: llm-inferencing-benchmark
+  name: llm-distributed-inferencing
   namespace: ray
 spec:
   entrypoint: python /home/ray/scripts/benchmark.py
@@ -59,7 +59,7 @@ spec:
           volumes:
             - name: scripts
               configMap:
-                name: inference-benchmark-scripts
+                name: llm-distributed-inferencing-scripts
                 items:
                   - key: benchmark.py
                     path: benchmark.py
@@ -96,7 +96,7 @@ spec:
             volumes:
               - name: scripts
                 configMap:
-                  name: inference-benchmark-scripts
+                  name: llm-distributed-inferencing-scripts
                   items:
                     - key: benchmark.py
                       path: benchmark.py

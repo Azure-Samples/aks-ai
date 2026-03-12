@@ -1,7 +1,7 @@
 apiVersion: ray.io/v1
 kind: RayJob
 metadata:
-  name: distributed-training
+  name: multimodel-distributed-training
   namespace: ray
 spec:
   entrypoint: python /home/ray/scripts/distributed_training.py
@@ -68,7 +68,7 @@ spec:
           volumes:
             - name: scripts
               configMap:
-                name: distributed-training-scripts
+                name: multimodel-distributed-training-scripts
                 items:
                   - key: distributed_training.py
                     path: distributed_training.py
@@ -104,7 +104,7 @@ spec:
             volumes:
               - name: scripts
                 configMap:
-                  name: distributed-training-scripts
+                  name: multimodel-distributed-training-scripts
                   items:
                     - key: distributed_training.py
                       path: distributed_training.py
