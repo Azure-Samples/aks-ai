@@ -132,18 +132,3 @@ spec:
                   items:
                     - key: fine_tune.py
                       path: fine_tune.py
----
-apiVersion: resource.k8s.io/v1
-kind: ResourceClaimTemplate
-metadata:
-  name: gpus
-  namespace: ray
-spec:
-  spec:
-    devices:
-      requests:
-        - name: gpus
-          exactly:
-            deviceClassName: gpu.nvidia.com
-            count: 4
-            allocationMode: ExactCount

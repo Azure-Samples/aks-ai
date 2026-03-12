@@ -1,0 +1,131 @@
+apiVersion: v1
+items:
+- apiVersion: resource.k8s.io/v1
+  kind: ResourceClaim
+  metadata:
+    annotations:
+      resource.kubernetes.io/pod-claim-name: gpus
+    creationTimestamp: "2026-03-12T01:48:19Z"
+    finalizers:
+    - resource.kubernetes.io/delete-protection
+    generateName: distributed-finetuning-vjqg6-workers-worker-m7trk-gpus-
+    name: distributed-finetuning-vjqg6-workers-worker-m7trk-gpus-kj94g
+    namespace: ray
+    ownerReferences:
+    - apiVersion: v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: Pod
+      name: distributed-finetuning-vjqg6-workers-worker-m7trk
+      uid: 5a662063-0cab-4855-a310-79b76ed07d8c
+    resourceVersion: "477004"
+    uid: 3044cd8e-381a-4f33-b4f8-60d09db70345
+  spec:
+    devices:
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 4
+          deviceClassName: gpu.nvidia.com
+          selectors:
+          - cel:
+              expression: device.attributes["gpu.nvidia.com"].productName == "NVIDIA
+                H100 80GB HBM3"
+        name: gpus
+  status:
+    allocation:
+      devices:
+        results:
+        - device: gpu-2
+          driver: gpu.nvidia.com
+          pool: aks-gpu-16852173-vmss000001
+          request: gpus
+        - device: gpu-3
+          driver: gpu.nvidia.com
+          pool: aks-gpu-16852173-vmss000001
+          request: gpus
+        - device: gpu-4
+          driver: gpu.nvidia.com
+          pool: aks-gpu-16852173-vmss000001
+          request: gpus
+        - device: gpu-5
+          driver: gpu.nvidia.com
+          pool: aks-gpu-16852173-vmss000001
+          request: gpus
+      nodeSelector:
+        nodeSelectorTerms:
+        - matchFields:
+          - key: metadata.name
+            operator: In
+            values:
+            - aks-gpu-16852173-vmss000001
+    reservedFor:
+    - name: distributed-finetuning-vjqg6-workers-worker-m7trk
+      resource: pods
+      uid: 5a662063-0cab-4855-a310-79b76ed07d8c
+- apiVersion: resource.k8s.io/v1
+  kind: ResourceClaim
+  metadata:
+    annotations:
+      resource.kubernetes.io/pod-claim-name: gpus
+    creationTimestamp: "2026-03-12T01:48:19Z"
+    finalizers:
+    - resource.kubernetes.io/delete-protection
+    generateName: distributed-finetuning-vjqg6-workers-worker-rhzr2-gpus-
+    name: distributed-finetuning-vjqg6-workers-worker-rhzr2-gpus-kv6sw
+    namespace: ray
+    ownerReferences:
+    - apiVersion: v1
+      blockOwnerDeletion: true
+      controller: true
+      kind: Pod
+      name: distributed-finetuning-vjqg6-workers-worker-rhzr2
+      uid: fdda6547-15ae-4aed-993a-173a5dc9a613
+    resourceVersion: "477006"
+    uid: 32287561-e602-4530-a6b3-d3b25ed6045b
+  spec:
+    devices:
+      requests:
+      - exactly:
+          allocationMode: ExactCount
+          count: 4
+          deviceClassName: gpu.nvidia.com
+          selectors:
+          - cel:
+              expression: device.attributes["gpu.nvidia.com"].productName == "NVIDIA
+                H100 80GB HBM3"
+        name: gpus
+  status:
+    allocation:
+      devices:
+        results:
+        - device: gpu-0
+          driver: gpu.nvidia.com
+          pool: aks-gpu-16852173-vmss000000
+          request: gpus
+        - device: gpu-1
+          driver: gpu.nvidia.com
+          pool: aks-gpu-16852173-vmss000000
+          request: gpus
+        - device: gpu-2
+          driver: gpu.nvidia.com
+          pool: aks-gpu-16852173-vmss000000
+          request: gpus
+        - device: gpu-3
+          driver: gpu.nvidia.com
+          pool: aks-gpu-16852173-vmss000000
+          request: gpus
+      nodeSelector:
+        nodeSelectorTerms:
+        - matchFields:
+          - key: metadata.name
+            operator: In
+            values:
+            - aks-gpu-16852173-vmss000000
+    reservedFor:
+    - name: distributed-finetuning-vjqg6-workers-worker-rhzr2
+      resource: pods
+      uid: fdda6547-15ae-4aed-993a-173a5dc9a613
+kind: List
+metadata:
+  resourceVersion: ""
