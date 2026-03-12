@@ -1,4 +1,8 @@
-### Workloads
+#!/bin/bash
+
+set -eo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 CLOUD=${1:?Usage: $0 <azure|nebius>}
 NAMESPACE=ray
@@ -8,7 +12,7 @@ if [[ "$CLOUD" != "azure" && "$CLOUD" != "nebius" ]]; then
     exit 1
 fi
 
-OVERLAY_DIR=examples/multimodal-training/overlays/$CLOUD
+OVERLAY_DIR="$SCRIPT_DIR/overlays/$CLOUD"
 
 # Install kuberay (skip if already deployed)
 if ! helm status kuberay-operator -n $NAMESPACE &>/dev/null; then
@@ -27,7 +31,7 @@ kubectl -n $NAMESPACE delete rayjob distributed-training --ignore-not-found
 
 # Create the ConfigMap holding the job script
 kubectl create configmap distributed-training-scripts \
-    --from-file=examples/multimodal-training/distributed_training.py \
+    --from-file="$SCRIPT_DIR/distributed_training.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
 # Apply the kustomize overlay (RayJob)
