@@ -1,3 +1,9 @@
+#!/bin/bash
+
+set -eo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 ### LLM Fine-Tuning (Entity Recognition)
 
 NAMESPACE=ray
@@ -19,11 +25,11 @@ kubectl -n $NAMESPACE delete rayjob distributed-finetuning --ignore-not-found
 
 # Create the ConfigMap holding the job script
 kubectl create configmap fine-tune-scripts \
-    --from-file=examples/llm-fine-tuning/fine_tune.py \
+    --from-file="$SCRIPT_DIR/fine_tune.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
 # Submit the RayJob (creates its own transient cluster)
-kubectl apply -f examples/llm-fine-tuning/rayjob.yaml
+kubectl apply -f "$SCRIPT_DIR/rayjob.yaml"
 
 # Wait for the job's pod to be running before streaming logs
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/created-by=kuberay-operator -n $NAMESPACE --timeout=300s
