@@ -13,7 +13,7 @@ kubectl -n $NAMESPACE delete rayjob multimodel-batch-inference --ignore-not-foun
 
 # Create the ConfigMap from the actual script file
 kubectl create configmap multimodel-batch-inference-scripts \
-    --from-file="$SCRIPT_DIR/batch_inference.py" \
+    --from-file="$SCRIPT_DIR/main.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
 # Submit the Job

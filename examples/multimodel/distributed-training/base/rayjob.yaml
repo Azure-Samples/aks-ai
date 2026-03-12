@@ -4,7 +4,7 @@ metadata:
   name: multimodel-distributed-training
   namespace: ray
 spec:
-  entrypoint: python /home/ray/scripts/distributed_training.py
+  entrypoint: python /home/ray/scripts/main.py
   runtimeEnvYAML: |
     pip:
       - ipywidgets==8.1.3
@@ -70,8 +70,8 @@ spec:
               configMap:
                 name: multimodel-distributed-training-scripts
                 items:
-                  - key: distributed_training.py
-                    path: distributed_training.py
+                  - key: main.py
+                    path: main.py
 
     workerGroupSpecs:
       - groupName: gpu-workers
@@ -106,5 +106,5 @@ spec:
                 configMap:
                   name: multimodel-distributed-training-scripts
                   items:
-                    - key: distributed_training.py
-                      path: distributed_training.py
+                    - key: main.py
+                      path: main.py

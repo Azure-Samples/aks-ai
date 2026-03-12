@@ -4,7 +4,7 @@ metadata:
   name: llm-distributed-inferencing
   namespace: ray
 spec:
-  entrypoint: python /home/ray/scripts/benchmark.py
+  entrypoint: python /home/ray/scripts/main.py
   runtimeEnvYAML: |
     pip:
       - "ray[llm]==2.53.0"
@@ -61,8 +61,8 @@ spec:
               configMap:
                 name: llm-distributed-inferencing-scripts
                 items:
-                  - key: benchmark.py
-                    path: benchmark.py
+                  - key: main.py
+                    path: main.py
 
     workerGroupSpecs:
       - groupName: workers
@@ -98,7 +98,7 @@ spec:
                 configMap:
                   name: llm-distributed-inferencing-scripts
                   items:
-                    - key: benchmark.py
-                      path: benchmark.py
+                    - key: main.py
+                      path: main.py
               - name: hf-cache
                 emptyDir: {}

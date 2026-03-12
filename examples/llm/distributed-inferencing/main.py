@@ -9,9 +9,9 @@ chat messages, runs them through the vLLM engine, and collects
 throughput / latency metrics from the results.
 
 Usage (local / standalone):
-  python benchmark.py
-  python benchmark.py --model Qwen/Qwen2.5-7B-Instruct --num-prompts 100
-  python benchmark.py --tensor-parallel-size 4
+  python main.py
+  python main.py --model Qwen/Qwen2.5-7B-Instruct --num-prompts 100
+  python main.py --tensor-parallel-size 4
 """
 
 import argparse

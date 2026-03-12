@@ -37,7 +37,7 @@ S3 (images) ──► read_images (CPU) ──► map(add_class) (CPU)
 
 | File | Description |
 |---|---|
-| `batch_inference.py` | Batch inference script — runs on the RayCluster |
+| `main.py` | Batch inference script — runs on the RayCluster |
 | `rayjob.yaml` | RayJob manifest — submits the script and manages the cluster |
 
 ## Architecture
@@ -50,7 +50,7 @@ kubectl apply -f rayjob.yaml
 │ RayJob: batch-inference                          │
 │                                                  │
 │  Head Pod (CPU, system node pool)                │
-│  ├── batch_inference.py (entrypoint via ConfigMap)│
+│  ├── main.py (entrypoint via ConfigMap)            │
 │  └── Drives the Ray Data pipeline                │
 │                                                  │
 │  Worker Pods (GPU) × 2                           │
@@ -72,7 +72,7 @@ Package the batch inference script so the RayJob pods can access it:
 
 ```bash
 kubectl create configmap batch-inference-scripts \
-    --from-file=batch_inference.py \
+    --from-file=main.py \
     -n ray --dry-run=client -o yaml | kubectl apply -f -
 ```
 
@@ -82,7 +82,7 @@ kubectl create configmap batch-inference-scripts \
 kubectl apply -f rayjob.yaml
 ```
 
-This creates a RayCluster (head + 2 GPU workers with 1 GPU each), installs pip dependencies via `runtimeEnvYAML`, runs `batch_inference.py`, and keeps the cluster alive for inspection.
+This creates a RayCluster (head + 2 GPU workers with 1 GPU each), installs pip dependencies via `runtimeEnvYAML`, runs `main.py`, and keeps the cluster alive for inspection.
 
 ### 3. Monitor
 

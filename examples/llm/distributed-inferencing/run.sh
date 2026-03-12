@@ -13,7 +13,7 @@ kubectl -n $NAMESPACE delete rayjob llm-distributed-inferencing --ignore-not-fou
 
 # Create the ConfigMap from the actual script file
 kubectl create configmap llm-distributed-inferencing-scripts \
-    --from-file="$SCRIPT_DIR/benchmark.py" \
+    --from-file="$SCRIPT_DIR/main.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
 # Submit the RayJob

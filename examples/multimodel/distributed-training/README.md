@@ -25,7 +25,7 @@ It is adapted from the [Ray E2E Multimodal AI Workloads — Distributed Training
 
 | File | Description |
 |---|---|
-| `distributed_training.py` | Training script — runs on the RayCluster |
+| `main.py` | Training script — runs on the RayCluster |
 | `rayjob.yaml` | RayJob manifest — submits the script and manages the cluster |
 | `doggos/embed.py` | CLIP embedding actor for Ray Data |
 
@@ -39,7 +39,7 @@ kubectl apply -f rayjob.yaml
 │ RayJob: distributed-training                    │
 │                                                 │
 │  Head Pod (CPU, system node pool)               │
-│  ├── distributed_training.py (entrypoint)       │
+│  ├── main.py (entrypoint)                        │
 │  ├── doggos/embed.py (CLIP actor)               │
 │  └── /mnt/cluster_storage (Azure Blob PVC)      │
 │                                                 │
@@ -67,7 +67,7 @@ Package the training script so the RayJob pods can access it:
 
 ```bash
 kubectl create configmap distributed-training-scripts \
-    --from-file=distributed_training.py \
+    --from-file=main.py \
     -n ray --dry-run=client -o yaml | kubectl apply -f -
 ```
 
@@ -77,7 +77,7 @@ kubectl create configmap distributed-training-scripts \
 kubectl apply -f rayjob.yaml
 ```
 
-This creates a RayCluster (head + 2 GPU workers), installs pip dependencies via `runtimeEnvYAML`, runs `distributed_training.py`, and keeps the cluster alive for inspection.
+This creates a RayCluster (head + 2 GPU workers), installs pip dependencies via `runtimeEnvYAML`, runs `main.py`, and keeps the cluster alive for inspection.
 
 ### 4. Monitor
 
@@ -117,7 +117,7 @@ The default `rayjob.yaml` is configured for **2 GPU worker nodes with 8 GPUs eac
 | `Standard_NC24ads_A100_v4` (A100) | 4 | 2 | `{"CPU": 8, "GPU": 4}` |
 | `Standard_ND96asr_v4` (A100 x8) | 8 | 2 | `{"CPU": 8, "GPU": 8}` |
 
-Update both `rayjob.yaml` (worker replicas and GPU limits) and the constants at the top of `distributed_training.py`.
+Update both `rayjob.yaml` (worker replicas and GPU limits) and the constants at the top of `main.py`.
 
 ## Key Differences from Anyscale Version
 

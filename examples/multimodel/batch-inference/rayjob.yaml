@@ -4,7 +4,7 @@ metadata:
   name: multimodel-batch-inference
   namespace: ray
 spec:
-  entrypoint: python /home/ray/scripts/batch_inference.py
+  entrypoint: python /home/ray/scripts/main.py
   runtimeEnvYAML: |
     pip:
       - ipywidgets==8.1.3
@@ -73,8 +73,8 @@ spec:
               configMap:
                 name: multimodel-batch-inference-scripts
                 items:
-                  - key: batch_inference.py
-                    path: batch_inference.py
+                  - key: main.py
+                    path: main.py
 
     workerGroupSpecs:
       - groupName: gpu-workers
@@ -115,5 +115,5 @@ spec:
                 configMap:
                   name: multimodel-batch-inference-scripts
                   items:
-                    - key: batch_inference.py
-                      path: batch_inference.py
+                    - key: main.py
+                      path: main.py

@@ -25,7 +25,7 @@ kubectl -n $NAMESPACE delete rayjob llm-fine-tuning --ignore-not-found
 
 # Create the ConfigMap holding the job script
 kubectl create configmap llm-fine-tuning-scripts \
-    --from-file="$SCRIPT_DIR/fine_tune.py" \
+    --from-file="$SCRIPT_DIR/main.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
 # Submit the RayJob (creates its own transient cluster)

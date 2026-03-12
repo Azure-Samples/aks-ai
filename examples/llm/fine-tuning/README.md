@@ -10,7 +10,7 @@
 ```bash
 NAMESPACE=ray
 kubectl create configmap fine-tune-scripts \
-  --from-file=fine_tune.py \
+  --from-file=main.py \
   -n $NAMESPACE \
   --dry-run=client -o yaml | kubectl apply -f -
 ```

@@ -8,7 +8,7 @@ This script performs:
   2. Distributed fine-tuning with Ray Train + LLaMA-Factory
 
 Usage (inside a RayJob, or via `ray job submit`):
-  python fine_tune.py
+  python main.py
 """
 
 import json

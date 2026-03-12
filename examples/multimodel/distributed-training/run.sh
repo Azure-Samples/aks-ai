@@ -31,7 +31,7 @@ kubectl -n $NAMESPACE delete rayjob multimodel-distributed-training --ignore-not
 
 # Create the ConfigMap holding the job script
 kubectl create configmap multimodel-distributed-training-scripts \
-    --from-file="$SCRIPT_DIR/distributed_training.py" \
+    --from-file="$SCRIPT_DIR/main.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
 # Apply the kustomize overlay (RayJob)
