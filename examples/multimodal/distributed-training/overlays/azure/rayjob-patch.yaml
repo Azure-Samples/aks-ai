@@ -8,13 +8,6 @@
   value:
     agentpool: cpu
 - op: add
-  path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/tolerations
-  value:
-    - key: sku
-      operator: Equal
-      value: gpu
-      effect: NoSchedule
-- op: add
   path: /spec/rayClusterSpec/workerGroupSpecs/0/template/spec/nodeSelector
   value:
     agentpool: gpu

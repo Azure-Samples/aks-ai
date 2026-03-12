@@ -16,7 +16,7 @@ It is adapted from the [Ray E2E Multimodal AI Workloads — Distributed Training
 | Component | Version / Details |
 |---|---|
 | Kubernetes cluster | AKS or Nebius with GPU node pool |
-| NVIDIA device plugin | Installed via cluster setup |
+| NVIDIA GPU DRA driver | `gpu.nvidia.com` device class available on GPU nodes |
 | KubeRay operator | v1.5.1 (installed by `run.sh` if not present) |
 | Shared PVC | `cluster-storage` (100Gi ReadWriteMany), created via `configs/pvc.yaml` |
 | Ray | 2.48.0 |
@@ -30,22 +30,23 @@ distributed-training/
 ├── doggos/embed.py                  # CLIP embedding actor for Ray Data
 ├── base/
 │   ├── kustomization.yaml           # Kustomize base
-│   └── rayjob.yaml                  # Cloud-agnostic RayJob manifest
+│   ├── rayjob.yaml                  # Cloud-agnostic RayJob manifest
+│   └── gpu-claim.yaml               # DRA ResourceClaimTemplate (8 GPUs per worker)
 └── overlays/
     ├── azure/
     │   ├── kustomization.yaml       # Azure overlay
-    │   └── rayjob-patch.yaml        # nodeSelector + tolerations for Azure
+    │   └── rayjob-patch.yaml        # nodeSelector for Azure
     └── nebius/
         ├── kustomization.yaml       # Nebius overlay
         └── rayjob-patch.yaml        # nodeSelector for Nebius
 ```
 
-The `base/rayjob.yaml` contains no hardcoded scheduling (`nodeSelector`, `affinity`, `tolerations`). Each cloud overlay applies JSON patches to place pods on the correct node pools:
+GPU allocation is defined in `base/gpu-claim.yaml` as a standalone [ResourceClaimTemplate](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/) (`multi-gpu`) that requests 8 NVIDIA H100 GPUs per worker via the `gpu.nvidia.com` device class. The RayJob references this template by name. Each cloud overlay applies JSON patches to place pods on the correct node pools:
 
 | Pod | Azure | Nebius |
 |---|---|---|
 | Submitter / Head | `agentpool: cpu` | `agentpool: nebius-cpu` |
-| GPU Workers | `agentpool: gpu` + `sku=gpu:NoSchedule` toleration | `agentpool: nebius-gpu` |
+| GPU Workers | `agentpool: gpu` | `agentpool: nebius-gpu` |
 
 ## Architecture
 
@@ -138,7 +139,7 @@ The default `base/rayjob.yaml` is configured for **2 GPU worker nodes with 8 GPU
 | `Standard_NC24ads_A100_v4` (A100) | 4 | 2 | `{"CPU": 8, "GPU": 4}` |
 | `Standard_ND96asr_v4` (A100 x8) | 8 | 2 | `{"CPU": 8, "GPU": 8}` |
 
-Update both `base/rayjob.yaml` (worker replicas and GPU limits) and the constants at the top of `main.py`.
+Update both `base/rayjob.yaml` (worker replicas) and the GPU `count` in `base/gpu-claim.yaml`, along with the constants at the top of `main.py`.
 
 ## Key Differences from Anyscale Version
 

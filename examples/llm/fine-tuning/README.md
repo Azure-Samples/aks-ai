@@ -11,7 +11,7 @@ Runs an end-to-end entity recognition pipeline (training + batch inference) usin
 | Component | Version / Details |
 |---|---|
 | Kubernetes cluster | AKS or Nebius with GPU node pool |
-| NVIDIA device plugin | Installed via cluster setup |
+| NVIDIA GPU DRA driver | `gpu.nvidia.com` device class available on GPU nodes |
 | KubeRay operator | v1.5.1 (installed by `run.sh` if not present) |
 | Ray | 2.53.0 |
 
@@ -23,27 +23,28 @@ fine-tuning/
 ├── run.sh                           # One-command launcher (azure or nebius)
 ├── base/
 │   ├── kustomization.yaml           # Kustomize base
-│   └── rayjob.yaml                  # Cloud-agnostic RayJob manifest
+│   ├── rayjob.yaml                  # Cloud-agnostic RayJob manifest
+│   └── gpu-claim.yaml               # DRA ResourceClaimTemplate (8 GPUs per worker)
 ├── overlays/
 │   ├── azure/
 │   │   ├── kustomization.yaml       # Azure overlay
-│   │   └── rayjob-patch.yaml        # nodeSelector + tolerations for Azure
+│   │   └── rayjob-patch.yaml        # nodeSelector for Azure
 │   └── nebius/
 │       ├── kustomization.yaml       # Nebius overlay
 │       └── rayjob-patch.yaml        # nodeSelector for Nebius
-├── resourceclaim.yaml               # DRA reference (for clusters using DRA)
-├── resourceclaimtemplate.yaml        # DRA reference
-└── resourceslice.yaml               # DRA reference
+├── resourceclaim.yaml               # DRA reference (example allocated claim)
+├── resourceclaimtemplate.yaml        # DRA reference (standalone template)
+└── resourceslice.yaml               # DRA reference (node GPU inventory)
 ```
 
-The `base/rayjob.yaml` contains no hardcoded scheduling. Each cloud overlay applies JSON patches to place pods on the correct node pools:
+GPU allocation is defined in `base/gpu-claim.yaml` as a standalone [ResourceClaimTemplate](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/) (`multi-gpu`) that requests 8 NVIDIA H100 GPUs per worker via the `gpu.nvidia.com` device class. The RayJob references this template by name. Each cloud overlay applies JSON patches to place pods on the correct node pools:
 
 | Pod | Azure | Nebius |
 |---|---|---|
 | Submitter / Head | `agentpool: cpu` | `agentpool: nebius-cpu` |
-| GPU Workers | `agentpool: gpu` + `sku=gpu:NoSchedule` toleration | `agentpool: nebius-gpu` |
+| GPU Workers | `agentpool: gpu` | `agentpool: nebius-gpu` |
 
-> **Note:** The `resourceclaim*.yaml` and `resourceslice.yaml` files are reference manifests for clusters using Kubernetes Dynamic Resource Allocation (DRA) instead of standard `nvidia.com/gpu` resource limits. They are not used by the kustomize overlays.
+> **Note:** The `resourceclaim*.yaml` and `resourceslice.yaml` files are reference manifests showing what DRA objects look like when allocated on a live cluster. They are not applied directly — the RayJob references the standalone `ResourceClaimTemplate` defined in `base/gpu-claim.yaml`.
 
 ## Architecture
 
@@ -104,7 +105,7 @@ kubectl -n ray port-forward svc/llm-fine-tuning-head-svc 8265:8265
 
 ## Scaling
 
-The default `base/rayjob.yaml` uses **2 GPU worker nodes with 8 GPUs each** (16 total). Adjust `replicas`, `num-gpus`, and `nvidia.com/gpu` values in `base/rayjob.yaml` for your node pool configuration.
+The default `base/rayjob.yaml` uses **2 GPU worker nodes with 8 H100 GPUs each** (16 total), allocated via DRA. Adjust `replicas`, `num-gpus` in `base/rayjob.yaml` and the GPU `count` in `base/gpu-claim.yaml` for your node pool configuration.
 
 ## Cleanup
 

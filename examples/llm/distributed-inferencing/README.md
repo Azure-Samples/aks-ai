@@ -14,7 +14,7 @@ This example demonstrates **LLM inference benchmarking** on Kubernetes using [Ku
 | Component | Version / Details |
 |---|---|
 | Kubernetes cluster | AKS or Nebius with GPU node pool |
-| NVIDIA device plugin | Installed via cluster setup |
+| NVIDIA GPU DRA driver | `gpu.nvidia.com` device class available on GPU nodes |
 | KubeRay operator | v1.5.1+, installed via cluster setup |
 | Ray | 2.53.0 |
 
@@ -26,22 +26,23 @@ distributed-inferencing/
 ├── run.sh                           # One-command launcher (azure or nebius)
 ├── base/
 │   ├── kustomization.yaml           # Kustomize base
-│   └── rayjob.yaml                  # Cloud-agnostic RayJob manifest
+│   ├── rayjob.yaml                  # Cloud-agnostic RayJob manifest
+│   └── gpu-claim.yaml               # DRA ResourceClaimTemplate (1 GPU per worker)
 └── overlays/
     ├── azure/
     │   ├── kustomization.yaml       # Azure overlay
-    │   └── rayjob-patch.yaml        # nodeSelector + tolerations for Azure
+    │   └── rayjob-patch.yaml        # nodeSelector for Azure
     └── nebius/
         ├── kustomization.yaml       # Nebius overlay
         └── rayjob-patch.yaml        # nodeSelector for Nebius
 ```
 
-The `base/rayjob.yaml` contains no hardcoded scheduling. Each cloud overlay applies JSON patches to place pods on the correct node pools:
+GPU allocation is defined in `base/gpu-claim.yaml` as a standalone [ResourceClaimTemplate](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/) (`single-gpu`) that requests 1 NVIDIA H100 GPU per worker via the `gpu.nvidia.com` device class. The RayJob references this template by name. Each cloud overlay applies JSON patches to place pods on the correct node pools:
 
 | Pod | Azure | Nebius |
 |---|---|---|
 | Submitter / Head | `agentpool: cpu` | `agentpool: nebius-cpu` |
-| GPU Workers | `agentpool: gpu` + `sku=gpu:NoSchedule` toleration | `agentpool: nebius-gpu` |
+| GPU Workers | `agentpool: gpu` | `agentpool: nebius-gpu` |
 
 ## Architecture
 
@@ -117,7 +118,7 @@ These are set in `runtimeEnvYAML` inside `base/rayjob.yaml` and can be overridde
 
 ### Scaling
 
-The default `base/rayjob.yaml` uses **2 GPU worker nodes with 1 GPU each** (2 total). Adjust `replicas`, `num-gpus`, and `nvidia.com/gpu` values in `base/rayjob.yaml` and the `TENSOR_PARALLEL_SIZE` / `CONCURRENCY` environment variables for your node pool configuration.
+The default `base/rayjob.yaml` uses **2 GPU worker nodes with 1 GPU each** (2 total). Adjust `replicas`, `num-gpus` in `base/rayjob.yaml`, the GPU `count` in `base/gpu-claim.yaml`, and the `TENSOR_PARALLEL_SIZE` / `CONCURRENCY` environment variables for your node pool configuration.
 
 ## Cleanup
 

@@ -29,7 +29,7 @@ S3 (images) ──► read_images (CPU) ──► map(add_class) (CPU)
 | Component | Version / Details |
 |---|---|
 | Kubernetes cluster | AKS or Nebius with GPU node pool |
-| NVIDIA device plugin | Installed via cluster setup |
+| NVIDIA GPU DRA driver | `gpu.nvidia.com` device class available on GPU nodes |
 | KubeRay operator | v1.5.1+, installed via cluster setup |
 | Ray | 2.48.0 |
 
@@ -41,22 +41,23 @@ batch-inference/
 ├── run.sh                           # One-command launcher (azure or nebius)
 ├── base/
 │   ├── kustomization.yaml           # Kustomize base
-│   └── rayjob.yaml                  # Cloud-agnostic RayJob manifest
+│   ├── rayjob.yaml                  # Cloud-agnostic RayJob manifest
+│   └── gpu-claim.yaml               # DRA ResourceClaimTemplate (1 GPU per worker)
 └── overlays/
     ├── azure/
     │   ├── kustomization.yaml       # Azure overlay
-    │   └── rayjob-patch.yaml        # nodeSelector + tolerations for Azure
+    │   └── rayjob-patch.yaml        # nodeSelector for Azure
     └── nebius/
         ├── kustomization.yaml       # Nebius overlay
         └── rayjob-patch.yaml        # nodeSelector for Nebius
 ```
 
-The `base/rayjob.yaml` contains no hardcoded scheduling. Each cloud overlay applies JSON patches to place pods on the correct node pools:
+GPU allocation is defined in `base/gpu-claim.yaml` as a standalone [ResourceClaimTemplate](https://kubernetes.io/docs/concepts/scheduling-eviction/dynamic-resource-allocation/) (`single-gpu`) that requests 1 NVIDIA H100 GPU per worker via the `gpu.nvidia.com` device class. The RayJob references this template by name. Each cloud overlay applies JSON patches to place pods on the correct node pools:
 
 | Pod | Azure | Nebius |
 |---|---|---|
 | Submitter / Head | `agentpool: cpu` | `agentpool: nebius-cpu` |
-| GPU Workers | `agentpool: gpu` + `sku=gpu:NoSchedule` toleration | `agentpool: nebius-gpu` |
+| GPU Workers | `agentpool: gpu` | `agentpool: nebius-gpu` |
 
 ## Architecture
 
@@ -159,7 +160,7 @@ The default `base/rayjob.yaml` uses **2 GPU worker nodes with 1 GPU each** (2 to
 | `Standard_ND96asr_v4` (A100 x8) | 8 | 8 | 1 |
 | `gpu-h100-sxm-8gpu` (H100 x8) | 8 | 8-16 | 1-2 |
 
-Update the `replicas`, `num-gpus`, and `nvidia.com/gpu` values in `base/rayjob.yaml` along with the `NUM_GPU_ACTORS` environment variable.
+Update the `replicas`, `num-gpus`, and the GPU `count` in `base/gpu-claim.yaml` along with the `NUM_GPU_ACTORS` environment variable.
 
 > **Note:** The `runtimeEnvYAML` pip install runs per-actor on each worker node at startup. With large dependencies like `torch` (~2.8 GB), expect a 1-2 minute delay before GPU actors begin processing. To eliminate this delay, bake dependencies into a custom container image.
 

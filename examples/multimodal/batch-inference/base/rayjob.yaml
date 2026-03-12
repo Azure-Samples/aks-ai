@@ -89,11 +89,11 @@ spec:
                   limits:
                     cpu: "8"
                     memory: "16Gi"
-                    nvidia.com/gpu: "1"
                   requests:
                     cpu: "8"
                     memory: "16Gi"
-                    nvidia.com/gpu: "1"
+                  claims:
+                    - name: gpus
                 volumeMounts:
                   - name: scripts
                     mountPath: /home/ray/scripts
@@ -104,3 +104,6 @@ spec:
                   items:
                     - key: main.py
                       path: main.py
+            resourceClaims:
+              - name: gpus
+                resourceClaimTemplateName: single-gpu
