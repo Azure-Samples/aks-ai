@@ -4,30 +4,38 @@ Ray Worker Node Simulator - Tests performance with the head service.
 Performs three test phases:
   1. DNS Resolution  - Resolve the head service hostname, measure latency
   2. Job Metadata    - Fetch job list, retrieve details, update status via HTTP
-  3. Object Store    - Read and write large payloads, measure throughput
+  3. iperf3 TCP      - Measure network throughput and RTT to the head node
 """
 
-import concurrent.futures
-import hashlib
 import json
 import os
 import socket
+import subprocess
 import sys
 import time
 import urllib.request
 
 HEAD_SERVICE = os.environ.get("HEAD_SERVICE", "ray-head-svc")
 HEAD_PORT = int(os.environ.get("HEAD_PORT", "8265"))
+IPERF_PORT = int(os.environ.get("IPERF_PORT", "5201"))
+HEAD_IP = None  # Resolved once at startup to bypass DNS on every request
 WORKER_ID = os.environ.get("HOSTNAME", "worker-unknown")
-OBJECT_CHUNK_SIZE_MB = int(os.environ.get("OBJECT_CHUNK_SIZE_MB", "64"))
-NUM_THROUGHPUT_ROUNDS = int(os.environ.get("NUM_THROUGHPUT_ROUNDS", "5"))
-PARALLEL_STREAMS = int(os.environ.get("PARALLEL_STREAMS", "8"))
+IPERF_DURATION = int(os.environ.get("IPERF_DURATION", "60"))
+IPERF_PARALLEL = int(os.environ.get("IPERF_PARALLEL", "32"))
+IPERF_LENGTH = os.environ.get("IPERF_LENGTH", "128K")
 RETRY_INTERVAL = 5
 MAX_RETRIES = 24  # 2 minutes
 
 
 def log(msg):
     print(f"[WORKER {WORKER_ID}] {msg}", flush=True)
+
+
+def percentile(values, p):
+    """Return the p-th percentile (0-100) using nearest-rank."""
+    s = sorted(values)
+    idx = int(len(s) * p / 100)
+    return s[min(idx, len(s) - 1)]
 
 
 def phase_dns_resolution():
@@ -62,23 +70,29 @@ def phase_dns_resolution():
             log(f"  DNS lookup failed during latency test: {e}")
 
     if latencies:
-        avg = sum(latencies) / len(latencies)
-        log(f"  DNS avg latency ({len(latencies)} lookups): {avg:.2f} ms  "
-            f"min={min(latencies):.2f} ms  max={max(latencies):.2f} ms")
+        log(f"  DNS latency ({len(latencies)} lookups): "
+            f"p50={percentile(latencies, 50):.2f} ms  "
+            f"p90={percentile(latencies, 90):.2f} ms  "
+            f"p99={percentile(latencies, 99):.2f} ms")
     else:
         log("  DNS latency test: all lookups failed")
     return True
 
 
+def _host():
+    """Return the resolved head IP if available, otherwise the service name."""
+    return HEAD_IP or HEAD_SERVICE
+
+
 def http_get(path):
-    url = f"http://{HEAD_SERVICE}:{HEAD_PORT}{path}"
+    url = f"http://{_host()}:{HEAD_PORT}{path}"
     req = urllib.request.Request(url)
     with urllib.request.urlopen(req, timeout=30) as resp:
         return resp.status, json.loads(resp.read())
 
 
 def http_post(path, data):
-    url = f"http://{HEAD_SERVICE}:{HEAD_PORT}{path}"
+    url = f"http://{_host()}:{HEAD_PORT}{path}"
     body = json.dumps(data).encode()
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Content-Type", "application/json")
@@ -137,133 +151,169 @@ def phase_job_metadata():
     return True
 
 
-def _do_one_read(stream_id):
-    """Single read stream — returns (bytes_read, elapsed, ttfb)."""
-    url = f"http://{HEAD_SERVICE}:{HEAD_PORT}/api/object_store/read"
-    req = urllib.request.Request(url)
-    start = time.monotonic()
-    with urllib.request.urlopen(req, timeout=300) as resp:
-        ttfb = (time.monotonic() - start) * 1000
-        data = resp.read()
-    elapsed = time.monotonic() - start
-    return len(data), elapsed, ttfb
+def _run_iperf(direction, reverse=False):
+    """Run a single iperf3 test and return parsed JSON result.
+
+    Retries up to 5 times if the server is busy (another client connected).
+
+    Args:
+        direction: Label for logging ("send" or "receive").
+        reverse: If True, run in reverse mode (server sends to client).
+    """
+    cmd = [
+        "iperf3",
+        "--client", _host(),
+        "--port", str(IPERF_PORT),
+        "--time", str(IPERF_DURATION),
+        "--parallel", str(IPERF_PARALLEL),
+        "--length", IPERF_LENGTH,
+        "--json",
+    ]
+    if reverse:
+        cmd.append("--reverse")
+
+    max_attempts = 5
+    for attempt in range(1, max_attempts + 1):
+        log(f"  Running iperf3 {direction} test (attempt {attempt}): {' '.join(cmd)}")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=IPERF_DURATION + 30)
+
+        if result.returncode != 0:
+            # iperf3 --json puts error details in stdout, not stderr
+            error_msg = result.stderr.strip()
+            try:
+                err_json = json.loads(result.stdout)
+                error_msg = err_json.get("error", result.stdout[:500])
+            except (json.JSONDecodeError, ValueError):
+                error_msg = error_msg or result.stdout[:500]
+            log(f"  iperf3 {direction} FAILED (rc={result.returncode}): {error_msg}")
+            if attempt < max_attempts:
+                log(f"  Retrying in 5s...")
+                time.sleep(5)
+                continue
+            return None
+
+        try:
+            return json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            log(f"  iperf3 {direction} JSON parse error: {e}")
+            log(f"  stdout: {result.stdout[:500]}")
+            return None
+
+    return None
 
 
-def _do_one_write(payload):
-    """Single write stream — returns (bytes_written, elapsed)."""
-    url = f"http://{HEAD_SERVICE}:{HEAD_PORT}/api/object_store/write"
-    req = urllib.request.Request(url, data=payload, method="POST")
-    req.add_header("Content-Type", "application/octet-stream")
-    start = time.monotonic()
-    with urllib.request.urlopen(req, timeout=300) as resp:
-        resp.read()
-    elapsed = time.monotonic() - start
-    return len(payload), elapsed
+def _parse_iperf_results(data, direction):
+    """Extract and log key metrics from iperf3 JSON output.
+
+    Returns (throughput_gbps, rtt_ms) or None on failure.
+    """
+    if data is None:
+        return None
+
+    end = data.get("end", {})
+
+    # --- Per-interval RTT (from stream-level results) ---
+    intervals = data.get("intervals", [])
+    per_interval_rtts = []
+    for interval in intervals:
+        for stream in interval.get("streams", []):
+            rtt_us = stream.get("rtt")
+            if rtt_us is not None and rtt_us > 0:
+                per_interval_rtts.append(rtt_us / 1000.0)  # us -> ms
+
+    # --- Aggregate throughput ---
+    sum_sent = end.get("sum_sent", {})
+    sum_received = end.get("sum_received", {})
+    sent_bps = sum_sent.get("bits_per_second", 0)
+    recv_bps = sum_received.get("bits_per_second", 0)
+    sent_gbps = sent_bps / 1e9
+    recv_gbps = recv_bps / 1e9
+    retransmits = sum_sent.get("retransmits", "N/A")
+
+    log(f"  {direction} throughput: sent={sent_gbps:.2f} Gbps  "
+        f"received={recv_gbps:.2f} Gbps  retransmits={retransmits}")
+
+    # --- Per-stream summary ---
+    for stream in end.get("streams", []):
+        s = stream.get("sender", {})
+        sid = s.get("socket", "?")
+        sbps = s.get("bits_per_second", 0) / 1e9
+        log(f"    stream {sid}: {sbps:.2f} Gbps")
+
+    # --- RTT percentiles from per-interval data ---
+    if per_interval_rtts:
+        log(f"  {direction} RTT ({len(per_interval_rtts)} samples): "
+            f"p50={percentile(per_interval_rtts, 50):.3f} ms  "
+            f"p90={percentile(per_interval_rtts, 90):.3f} ms  "
+            f"p99={percentile(per_interval_rtts, 99):.3f} ms")
+    else:
+        # Fallback: use the mean_rtt from per-stream end summary
+        stream_rtts = []
+        for stream in end.get("streams", []):
+            sender = stream.get("sender", {})
+            mean_rtt = sender.get("mean_rtt")
+            if mean_rtt is not None and mean_rtt > 0:
+                stream_rtts.append(mean_rtt / 1000.0)  # us -> ms
+        if stream_rtts:
+            log(f"  {direction} RTT (stream means): "
+                f"p50={percentile(stream_rtts, 50):.3f} ms  "
+                f"p90={percentile(stream_rtts, 90):.3f} ms  "
+                f"p99={percentile(stream_rtts, 99):.3f} ms")
+        else:
+            log(f"  {direction} RTT: not available")
+
+    throughput_gbps = recv_gbps
+    rtt_ms = percentile(per_interval_rtts, 50) if per_interval_rtts else None
+    return throughput_gbps, rtt_ms
 
 
-def phase_object_store_throughput():
-    """Phase 3: Measure read/write throughput with parallel streams."""
+def phase_iperf():
+    """Phase 3: Measure network throughput and RTT using iperf3 TCP."""
     log("=" * 60)
-    log("PHASE 3: Object Store Throughput")
-    log(f"  chunk={OBJECT_CHUNK_SIZE_MB} MB  streams={PARALLEL_STREAMS}  "
-        f"rounds={NUM_THROUGHPUT_ROUNDS}")
+    log("PHASE 3: iperf3 TCP Network Benchmark")
+    log(f"  target={_host()}:{IPERF_PORT}  duration={IPERF_DURATION}s  "
+        f"parallel={IPERF_PARALLEL}  length={IPERF_LENGTH}")
     log("=" * 60)
 
-    chunk_bytes = OBJECT_CHUNK_SIZE_MB * 1024 * 1024
+    # --- Send test (client -> server) ---
+    log("  --- Send (client -> server) ---")
+    send_data = _run_iperf("send", reverse=False)
+    send_result = _parse_iperf_results(send_data, "SEND")
 
-    # --- Latency test (small request round-trip) ---
-    log("  --- Latency (small request round-trip) ---")
-    rt_latencies = []
-    for _ in range(20):
-        url = f"http://{HEAD_SERVICE}:{HEAD_PORT}/healthz"
-        req = urllib.request.Request(url)
-        start = time.monotonic()
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            resp.read()
-        rt_latencies.append((time.monotonic() - start) * 1000)
-    avg_rt = sum(rt_latencies) / len(rt_latencies)
-    p50 = sorted(rt_latencies)[len(rt_latencies) // 2]
-    p99 = sorted(rt_latencies)[int(len(rt_latencies) * 0.99)]
-    log(f"  RTT (20 reqs): avg={avg_rt:.2f} ms  p50={p50:.2f} ms  "
-        f"p99={p99:.2f} ms  min={min(rt_latencies):.2f} ms  "
-        f"max={max(rt_latencies):.2f} ms")
+    # Small delay between tests to let iperf3 server restart
+    time.sleep(2)
 
-    # --- Single-stream baseline ---
-    log("  --- Single-stream baseline ---")
-    _, r_elapsed, r_ttfb = _do_one_read(0)
-    r_mb = chunk_bytes / (1024 * 1024)
-    log(f"  READ  1x{r_mb:.0f} MB: {r_mb/r_elapsed:.1f} MB/s  "
-        f"TTFB={r_ttfb:.1f} ms")
-    payload = os.urandom(chunk_bytes)
-    _, w_elapsed = _do_one_write(payload)
-    log(f"  WRITE 1x{r_mb:.0f} MB: {r_mb/w_elapsed:.1f} MB/s")
+    # --- Receive test (server -> client, reverse mode) ---
+    log("  --- Receive (server -> client) ---")
+    recv_data = _run_iperf("receive", reverse=True)
+    recv_result = _parse_iperf_results(recv_data, "RECV")
 
-    # --- Parallel READ throughput ---
-    log(f"  --- READ ({PARALLEL_STREAMS} parallel streams) ---")
-    read_agg_rates = []
-    read_ttfbs = []
-    for rnd in range(1, NUM_THROUGHPUT_ROUNDS + 1):
-        start = time.monotonic()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=PARALLEL_STREAMS) as pool:
-            futures = [pool.submit(_do_one_read, s) for s in range(PARALLEL_STREAMS)]
-            results = [f.result() for f in futures]
-        wall_time = time.monotonic() - start
-        total_mb = sum(r[0] for r in results) / (1024 * 1024)
-        agg_rate = total_mb / wall_time
-        ttfbs = [r[2] for r in results]
-        per_stream = [r[0] / (1024 * 1024) / r[1] for r in results]
-        read_agg_rates.append(agg_rate)
-        read_ttfbs.extend(ttfbs)
-        log(f"  READ  round {rnd}/{NUM_THROUGHPUT_ROUNDS}: "
-            f"{total_mb:.0f} MB in {wall_time:.3f}s = {agg_rate:.1f} MB/s aggregate  "
-            f"per-stream avg={sum(per_stream)/len(per_stream):.1f} MB/s  "
-            f"TTFB avg={sum(ttfbs)/len(ttfbs):.1f} ms")
-
-    avg_read = sum(read_agg_rates) / len(read_agg_rates)
-    log(f"  READ  aggregate: avg={avg_read:.1f} MB/s  "
-        f"min={min(read_agg_rates):.1f}  max={max(read_agg_rates):.1f}")
-    log(f"  READ  TTFB:      avg={sum(read_ttfbs)/len(read_ttfbs):.1f} ms  "
-        f"min={min(read_ttfbs):.1f}  max={max(read_ttfbs):.1f}")
-
-    # --- Parallel WRITE throughput ---
-    log(f"  --- WRITE ({PARALLEL_STREAMS} parallel streams) ---")
-    # Pre-generate one payload per stream to avoid memory contention
-    payloads = [os.urandom(chunk_bytes) for _ in range(PARALLEL_STREAMS)]
-    write_agg_rates = []
-    for rnd in range(1, NUM_THROUGHPUT_ROUNDS + 1):
-        start = time.monotonic()
-        with concurrent.futures.ThreadPoolExecutor(max_workers=PARALLEL_STREAMS) as pool:
-            futures = [pool.submit(_do_one_write, payloads[s]) for s in range(PARALLEL_STREAMS)]
-            results = [f.result() for f in futures]
-        wall_time = time.monotonic() - start
-        total_mb = sum(r[0] for r in results) / (1024 * 1024)
-        agg_rate = total_mb / wall_time
-        per_stream = [r[0] / (1024 * 1024) / r[1] for r in results]
-        write_agg_rates.append(agg_rate)
-        log(f"  WRITE round {rnd}/{NUM_THROUGHPUT_ROUNDS}: "
-            f"{total_mb:.0f} MB in {wall_time:.3f}s = {agg_rate:.1f} MB/s aggregate  "
-            f"per-stream avg={sum(per_stream)/len(per_stream):.1f} MB/s")
-
-    avg_write = sum(write_agg_rates) / len(write_agg_rates)
-    log(f"  WRITE aggregate: avg={avg_write:.1f} MB/s  "
-        f"min={min(write_agg_rates):.1f}  max={max(write_agg_rates):.1f}")
-
-    return avg_read, avg_write, avg_rt
+    return send_result, recv_result
 
 
 def main():
     log("Starting Ray worker benchmark")
     log(f"  HEAD_SERVICE={HEAD_SERVICE}  HEAD_PORT={HEAD_PORT}")
-    log(f"  OBJECT_CHUNK_SIZE_MB={OBJECT_CHUNK_SIZE_MB}")
-    log(f"  NUM_THROUGHPUT_ROUNDS={NUM_THROUGHPUT_ROUNDS}")
-    log(f"  PARALLEL_STREAMS={PARALLEL_STREAMS}")
+    log(f"  IPERF_PORT={IPERF_PORT}  IPERF_DURATION={IPERF_DURATION}s")
+    log(f"  IPERF_PARALLEL={IPERF_PARALLEL}  "
+        f"IPERF_LENGTH={IPERF_LENGTH}")
 
     if not wait_for_head():
         sys.exit(1)
 
     phase_dns_resolution()
+
+    # Resolve head pod IP so subsequent phases skip DNS on every request
+    global HEAD_IP
+    try:
+        results = socket.getaddrinfo(HEAD_SERVICE, HEAD_PORT, socket.AF_INET, socket.SOCK_STREAM)
+        HEAD_IP = results[0][4][0]
+        log(f"Using head pod IP: {HEAD_IP} (bypassing DNS for benchmarks)")
+    except socket.gaierror as e:
+        log(f"WARNING: could not resolve head IP, falling back to service name: {e}")
+
     phase_job_metadata()
-    avg_read, avg_write, avg_rt = phase_object_store_throughput()
+    send_result, recv_result = phase_iperf()
 
     # Final summary
     log("=" * 60)
@@ -271,9 +321,20 @@ def main():
     log("=" * 60)
     log(f"  DNS resolution:     PASS")
     log(f"  Job metadata HTTP:  PASS")
-    log(f"  Object store RTT:   {avg_rt:.2f} ms avg")
-    log(f"  Object store READ:  {avg_read:.1f} MB/s avg")
-    log(f"  Object store WRITE: {avg_write:.1f} MB/s avg")
+
+    if send_result:
+        send_tp, send_rtt = send_result
+        rtt_str = f"  RTT p50={send_rtt:.3f} ms" if send_rtt else ""
+        log(f"  iperf3 SEND:        {send_tp:.2f} Gbps{rtt_str}")
+    else:
+        log(f"  iperf3 SEND:        FAILED")
+
+    if recv_result:
+        recv_tp, recv_rtt = recv_result
+        rtt_str = f"  RTT p50={recv_rtt:.3f} ms" if recv_rtt else ""
+        log(f"  iperf3 RECV:        {recv_tp:.2f} Gbps{rtt_str}")
+    else:
+        log(f"  iperf3 RECV:        FAILED")
 
     # Mark job as complete
     http_post(f"/api/jobs/job-001/status", {

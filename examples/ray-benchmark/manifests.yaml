@@ -14,6 +14,10 @@ spec:
       port: 8265
       targetPort: 8265
       protocol: TCP
+    - name: iperf
+      port: 5201
+      targetPort: 5201
+      protocol: TCP
 ---
 # Head Deployment: runs on CPU node pool (mimics Ray head)
 apiVersion: apps/v1
@@ -39,23 +43,18 @@ spec:
                     operator: In
                     values:
                       - nebius
-        podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            - labelSelector:
-                matchLabels:
-                  app: ray-benchmark-worker
-              topologyKey: kubernetes.io/hostname
       containers:
         - name: head
           image: python:3.12-slim
-          command: ["python", "/scripts/head_server.py"]
+          command: ["sh", "-c", "apt-get update && apt-get install -y iperf3 && python /scripts/head_server.py"]
           env:
             - name: HEAD_PORT
               value: "8265"
-            - name: OBJECT_CHUNK_SIZE_MB
-              value: "1024"
+            - name: IPERF_PORT
+              value: "5201"
           ports:
             - containerPort: 8265
+            - containerPort: 5201
           resources:
             requests:
               cpu: "8"
@@ -83,8 +82,8 @@ kind: Job
 metadata:
   name: ray-benchmark-worker
 spec:
-  completions: 2
-  parallelism: 2
+  completions: 1
+  parallelism: 1
   template:
     metadata:
       labels:
@@ -103,18 +102,18 @@ spec:
       containers:
         - name: worker
           image: python:3.12-slim
-          command: ["python", "/scripts/worker_client.py"]
+          command: ["sh", "-c", "apt-get update && apt-get install -y iperf3 && python /scripts/worker_client.py"]
           env:
             - name: HEAD_SERVICE
               value: "ray-head-svc"
             - name: HEAD_PORT
               value: "8265"
-            - name: OBJECT_CHUNK_SIZE_MB
-              value: "1024"
-            - name: NUM_THROUGHPUT_ROUNDS
-              value: "10"
-            - name: PARALLEL_STREAMS
-              value: "8"
+            - name: IPERF_PORT
+              value: "5201"
+            - name: IPERF_DURATION
+              value: "30"
+            - name: IPERF_PARALLEL
+              value: "32"
           resources:
             requests:
               cpu: "8"

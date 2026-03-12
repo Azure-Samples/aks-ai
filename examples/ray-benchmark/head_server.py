@@ -1,28 +1,25 @@
 """
-Ray Head Node Simulator - HTTP server for job metadata, status, and object store.
+Ray Head Node Simulator - HTTP server for job metadata and iperf3 server.
 
 Exposes endpoints that mimic Ray head service:
   - GET  /api/jobs              List all jobs
   - GET  /api/jobs/<id>         Get job metadata and status
   - POST /api/jobs/<id>/status  Update job status from worker
-  - GET  /api/object_store/read Read a large data chunk (throughput test)
-  - POST /api/object_store/write Accept a large data chunk (throughput test)
+
+Also runs an iperf3 server on IPERF_PORT (default 5201) for network
+throughput and RTT measurement by worker nodes.
 """
 
 import http.server
 import json
 import os
+import subprocess
 import time
 import threading
-import hashlib
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("HEAD_PORT", "8265"))
-OBJECT_CHUNK_SIZE = int(os.environ.get("OBJECT_CHUNK_SIZE_MB", "64")) * 1024 * 1024
-
-# Pre-generate a large byte payload for object store read tests
-_object_store_data = os.urandom(OBJECT_CHUNK_SIZE)
-_object_store_checksum = hashlib.sha256(_object_store_data).hexdigest()
+IPERF_PORT = int(os.environ.get("IPERF_PORT", "5201"))
 
 # In-memory job registry
 jobs = {
@@ -32,7 +29,7 @@ jobs = {
         "status": "PENDING",
         "submitted_at": time.time(),
         "metadata": {
-            "num_workers": 2,
+            "num_workers": 1,
             "gpus_per_worker": 1,
             "framework": "pytorch",
             "entrypoint": "python train.py",
@@ -80,19 +77,6 @@ class HeadHandler(http.server.BaseHTTPRequestHandler):
             else:
                 self._send_json({"error": "job not found"}, 404)
 
-        elif self.path == "/api/object_store/read":
-            start = time.monotonic()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/octet-stream")
-            self.send_header("Content-Length", str(len(_object_store_data)))
-            self.send_header("X-Checksum", _object_store_checksum)
-            self.end_headers()
-            self.wfile.write(_object_store_data)
-            elapsed = time.monotonic() - start
-            mb = len(_object_store_data) / (1024 * 1024)
-            print(f"[HEAD] Served {mb:.0f} MB read in {elapsed:.3f}s "
-                  f"({mb / elapsed:.1f} MB/s)")
-
         elif self.path == "/healthz":
             self._send_json({"status": "ok"})
 
@@ -114,27 +98,30 @@ class HeadHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     self._send_json({"error": "job not found"}, 404)
 
-        elif self.path == "/api/object_store/write":
-            start = time.monotonic()
-            data = self.rfile.read(content_len)
-            elapsed = time.monotonic() - start
-            checksum = hashlib.sha256(data).hexdigest()
-            mb = len(data) / (1024 * 1024)
-            print(f"[HEAD] Received {mb:.0f} MB write in {elapsed:.3f}s "
-                  f"({mb / elapsed:.1f} MB/s)")
-            self._send_json({
-                "bytes_received": len(data),
-                "checksum": checksum,
-                "elapsed_s": round(elapsed, 4),
-                "throughput_mbps": round(mb / elapsed, 2),
-            })
-
         else:
             self._send_json({"error": "not found"}, 404)
 
 
+def start_iperf_server():
+    """Start iperf3 server in the background."""
+    print(f"[HEAD] Starting iperf3 server on port {IPERF_PORT}")
+    proc = subprocess.Popen(
+        ["iperf3", "--server", "--port", str(IPERF_PORT)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    for line in iter(proc.stdout.readline, b""):
+        print(f"[HEAD-IPERF] {line.decode().rstrip()}")
+    rc = proc.wait()
+    print(f"[HEAD] iperf3 server exited with rc={rc}")
+
+
 if __name__ == "__main__":
+    # Start iperf3 server in a daemon thread (restarts after each client)
+    iperf_thread = threading.Thread(target=start_iperf_server, daemon=True)
+    iperf_thread.start()
+
     server = http.server.ThreadingHTTPServer((HOST, PORT), HeadHandler)
     print(f"[HEAD] Ray head simulator listening on {HOST}:{PORT}")
-    print(f"[HEAD] Object store chunk size: {OBJECT_CHUNK_SIZE / (1024*1024):.0f} MB")
+    print(f"[HEAD] iperf3 server listening on {IPERF_PORT}")
     server.serve_forever()
