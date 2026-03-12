@@ -1,3 +1,9 @@
+#!/bin/bash
+
+set -eo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 ### Inference Benchmark
 
 NAMESPACE=ray
@@ -7,11 +13,11 @@ kubectl -n $NAMESPACE delete rayjob batch-inference --ignore-not-found
 
 # Create the ConfigMap from the actual script file
 kubectl create configmap batch-inference-scripts \
-    --from-file=examples/batch-inference/batch_inference.py \
+    --from-file="$SCRIPT_DIR/batch_inference.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
 # Submit the Job
-kubectl apply -f examples/batch-inference/rayjob.yaml
+kubectl apply -f "$SCRIPT_DIR/rayjob.yaml"
 
 # Wait for the pod to be running
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/created-by=kuberay-operator -n $NAMESPACE  --timeout=300s
