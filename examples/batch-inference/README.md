@@ -54,7 +54,7 @@ kubectl apply -f rayjob.yaml
 │  └── Drives the Ray Data pipeline                │
 │                                                  │
 │  Worker Pods (GPU) × 2                           │
-│  ├── 8 GPUs each (16 total)                      │
+│  ├── 1 GPU each (2 total)                        │
 │  └── CLIP embedding actors via map_batches       │
 │                                                  │
 │  Ray Object Store (shared memory)                │
@@ -82,7 +82,7 @@ kubectl create configmap batch-inference-scripts \
 kubectl apply -f rayjob.yaml
 ```
 
-This creates a RayCluster (head + 2 GPU workers with 8 GPUs each), installs pip dependencies via `runtimeEnvYAML`, runs `batch_inference.py`, and keeps the cluster alive for inspection.
+This creates a RayCluster (head + 2 GPU workers with 1 GPU each), installs pip dependencies via `runtimeEnvYAML`, runs `batch_inference.py`, and keeps the cluster alive for inspection.
 
 ### 3. Monitor
 
@@ -119,7 +119,7 @@ Since embeddings live in Ray's object store, they are **ephemeral** — they exi
 | Variable | Default | Description |
 |---|---|---|
 | `BATCH_SIZE` | `64` | Batch size for CLIP embedding |
-| `NUM_GPU_ACTORS` | `4` | Number of GPU actor replicas (set to `16` in `rayjob.yaml`) |
+| `NUM_GPU_ACTORS` | `4` | Number of GPU actor replicas (set to `2` in `rayjob.yaml`) |
 | `TOP_K` | `5` | Number of similar images to retrieve |
 | `SAMPLE_IMAGE_URL` | `https://doggos-dataset.s3...samara.png` | Query image for similarity demo |
 
@@ -127,7 +127,7 @@ These are set in `runtimeEnvYAML` inside `rayjob.yaml` and can be overridden the
 
 ### Scaling
 
-The default `rayjob.yaml` uses **2 GPU worker nodes with 8 GPUs each** (16 total) and 16 CLIP embedding actors. Adjust for your setup:
+The default `rayjob.yaml` uses **2 GPU worker nodes with 1 GPU each** (2 total) and 2 CLIP embedding actors. Adjust for your setup:
 
 | Node Pool VM SKU | GPUs/Node | Suggested `NUM_GPU_ACTORS` | Worker Replicas |
 |---|---|---|---|

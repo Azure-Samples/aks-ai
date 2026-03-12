@@ -16,7 +16,7 @@ spec:
       - "doggos @ git+https://github.com/anyscale/multimodal-ai.git#subdirectory=doggos"
     env_vars:
       BATCH_SIZE: "64"
-      NUM_GPU_ACTORS: "16"
+      NUM_GPU_ACTORS: "2"
       TOP_K: "5"
 
   shutdownAfterJobFinishes: false   # keep cluster alive to inspect results
@@ -82,8 +82,8 @@ spec:
         minReplicas: 2
         maxReplicas: 2
         rayStartParams:
-          num-gpus: "8"
-          num-cpus: "64"
+          num-gpus: "1"
+          num-cpus: "8"
         template:
           spec:
             # affinity:
@@ -100,13 +100,13 @@ spec:
                 image: rayproject/ray:2.48.0-py312-gpu
                 resources:
                   limits:
-                    cpu: "64"
-                    memory: "64Gi"
-                    nvidia.com/gpu: "8"
+                    cpu: "8"
+                    memory: "16Gi"
+                    nvidia.com/gpu: "1"
                   requests:
-                    cpu: "64"
-                    memory: "64Gi"
-                    nvidia.com/gpu: "8"
+                    cpu: "8"
+                    memory: "16Gi"
+                    nvidia.com/gpu: "1"
                 volumeMounts:
                   - name: scripts
                     mountPath: /home/ray/scripts
