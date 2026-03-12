@@ -21,10 +21,10 @@ if ! helm status kuberay-operator -n $NAMESPACE &>/dev/null; then
 fi
 
 # Clean up existing rayjob
-kubectl -n $NAMESPACE delete rayjob distributed-finetuning --ignore-not-found
+kubectl -n $NAMESPACE delete rayjob llm-fine-tuning --ignore-not-found
 
 # Create the ConfigMap holding the job script
-kubectl create configmap fine-tune-scripts \
+kubectl create configmap llm-fine-tuning-scripts \
     --from-file="$SCRIPT_DIR/fine_tune.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
@@ -33,7 +33,7 @@ kubectl apply -f "$SCRIPT_DIR/rayjob.yaml"
 
 # Wait for the job's pod to be running before streaming logs
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/created-by=kuberay-operator -n $NAMESPACE --timeout=300s
-kubectl wait --for=condition=Ready pod -l job-name=distributed-finetuning -n $NAMESPACE --timeout=300s
+kubectl wait --for=condition=Ready pod -l job-name=llm-fine-tuning -n $NAMESPACE --timeout=300s
 kubectl -n $NAMESPACE get pods -o wide
 
-kubectl -n $NAMESPACE logs -f -l job-name=distributed-finetuning --tail=100
+kubectl -n $NAMESPACE logs -f -l job-name=llm-fine-tuning --tail=100

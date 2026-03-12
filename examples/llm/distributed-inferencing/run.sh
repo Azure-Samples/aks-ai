@@ -9,10 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAMESPACE=ray
 
 # Clean up existing RayJob
-kubectl -n $NAMESPACE delete rayjob llm-inferencing-benchmark --ignore-not-found
+kubectl -n $NAMESPACE delete rayjob llm-distributed-inferencing --ignore-not-found
 
 # Create the ConfigMap from the actual script file
-kubectl create configmap inference-benchmark-scripts \
+kubectl create configmap llm-distributed-inferencing-scripts \
     --from-file="$SCRIPT_DIR/benchmark.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
@@ -20,7 +20,7 @@ kubectl create configmap inference-benchmark-scripts \
 kubectl apply -f "$SCRIPT_DIR/rayjob.yaml"
 
 # Watch job status
-kubectl -n $NAMESPACE get rayjob llm-inferencing-benchmark -w
+kubectl -n $NAMESPACE get rayjob llm-distributed-inferencing -w
 
 # Stream logs
-kubectl -n $NAMESPACE logs -f -l job-name=llm-inferencing-benchmark --tail=200
+kubectl -n $NAMESPACE logs -f -l job-name=llm-distributed-inferencing --tail=200

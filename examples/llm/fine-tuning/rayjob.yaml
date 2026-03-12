@@ -1,7 +1,7 @@
 apiVersion: ray.io/v1
 kind: RayJob
 metadata:
-  name: distributed-finetuning
+  name: llm-fine-tuning
   namespace: ray
 spec:
   entrypoint: python /home/ray/scripts/fine_tune.py
@@ -83,7 +83,7 @@ spec:
           volumes:
             - name: scripts
               configMap:
-                name: fine-tune-scripts
+                name: llm-fine-tuning-scripts
                 items:
                   - key: fine_tune.py
                     path: fine_tune.py
@@ -128,7 +128,7 @@ spec:
             volumes:
               - name: scripts
                 configMap:
-                  name: fine-tune-scripts
+                  name: llm-fine-tuning-scripts
                   items:
                     - key: fine_tune.py
                       path: fine_tune.py

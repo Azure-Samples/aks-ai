@@ -26,11 +26,11 @@ if ! helm status kuberay-operator -n $NAMESPACE &>/dev/null; then
         --wait
 fi
 
-kubectl -n $NAMESPACE delete configmap distributed-training-scripts --ignore-not-found
-kubectl -n $NAMESPACE delete rayjob distributed-training --ignore-not-found
+kubectl -n $NAMESPACE delete configmap multimodel-distributed-training-scripts --ignore-not-found
+kubectl -n $NAMESPACE delete rayjob multimodel-distributed-training --ignore-not-found
 
 # Create the ConfigMap holding the job script
-kubectl create configmap distributed-training-scripts \
+kubectl create configmap multimodel-distributed-training-scripts \
     --from-file="$SCRIPT_DIR/distributed_training.py" \
     -n $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
 
@@ -39,6 +39,6 @@ kubectl apply -k "$OVERLAY_DIR"
 
 # Wait for the job's pod to be running before streaming logs
 kubectl wait --for=condition=Ready pod -l app.kubernetes.io/created-by=kuberay-operator -n $NAMESPACE  --timeout=3600s
-kubectl wait --for=condition=Ready pod -l job-name=distributed-training -n $NAMESPACE --timeout=3600s
+kubectl wait --for=condition=Ready pod -l job-name=multimodel-distributed-training -n $NAMESPACE --timeout=3600s
 
-kubectl -n $NAMESPACE logs -f -l job-name=distributed-training --tail=100
+kubectl -n $NAMESPACE logs -f -l job-name=multimodel-distributed-training --tail=100
