@@ -1,7 +1,7 @@
 apiVersion: ray.io/v1
 kind: RayJob
 metadata:
-  name: llm-distributed-inferencing
+  name: llm-inferencing
   namespace: ray
 spec:
   entrypoint: python /home/ray/scripts/main.py
@@ -11,10 +11,10 @@ spec:
       - "vllm>=0.12.0,<0.13.0"
     env_vars:
       MODEL: "Qwen/Qwen2.5-7B-Instruct"
-      NUM_PROMPTS: "50"
-      MAX_TOKENS: "256"
+      NUM_PROMPTS: "10"
+      MAX_TOKENS: "64"
       TENSOR_PARALLEL_SIZE: "1"
-      CONCURRENCY: "1"
+      CONCURRENCY: "2"
 
   shutdownAfterJobFinishes: false # keep cluster alive to inspect results
 
@@ -64,7 +64,7 @@ spec:
           volumes:
             - name: scripts
               configMap:
-                name: llm-distributed-inferencing-scripts
+                name: llm-inferencing-scripts
                 items:
                   - key: main.py
                     path: main.py
@@ -99,7 +99,7 @@ spec:
             volumes:
               - name: scripts
                 configMap:
-                  name: llm-distributed-inferencing-scripts
+                  name: llm-inferencing-scripts
                   items:
                     - key: main.py
                       path: main.py

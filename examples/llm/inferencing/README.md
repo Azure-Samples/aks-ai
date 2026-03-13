@@ -21,7 +21,7 @@ This example demonstrates **LLM inference benchmarking** on Kubernetes using [Ku
 ## Directory Structure
 
 ```
-distributed-inferencing/
+inferencing/
 ├── main.py                          # Benchmark script (runs on the RayCluster)
 ├── run.sh                           # One-command launcher (azure or nebius)
 ├── base/
@@ -51,7 +51,7 @@ GPU allocation is defined in `base/gpu-claim.yaml` as a standalone [ResourceClai
         │
         ▼
 ┌──────────────────────────────────────────────────┐
-│ RayJob: llm-distributed-inferencing              │
+│ RayJob: llm-inferencing              │
 │                                                  │
 │  Head Pod (CPU node pool)                        │
 │  ├── main.py (entrypoint via ConfigMap)          │
@@ -81,7 +81,7 @@ Or apply manually:
 
 ```bash
 # Create the ConfigMap
-kubectl create configmap llm-distributed-inferencing-scripts \
+kubectl create configmap llm-inferencing-scripts \
     --from-file=main.py \
     -n ray --dry-run=client -o yaml | kubectl apply -f -
 
@@ -93,13 +93,13 @@ kubectl apply -k overlays/azure   # or overlays/nebius
 
 ```bash
 # Watch job status
-kubectl -n ray get rayjob llm-distributed-inferencing -w
+kubectl -n ray get rayjob llm-inferencing -w
 
 # Stream logs
-kubectl -n ray logs -f -l job-name=llm-distributed-inferencing --tail=200
+kubectl -n ray logs -f -l job-name=llm-inferencing --tail=200
 
 # Ray Dashboard
-kubectl -n ray port-forward svc/llm-distributed-inferencing-head-svc 8265:8265
+kubectl -n ray port-forward svc/llm-inferencing-head-svc 8265:8265
 ```
 
 ## Configuration
@@ -109,10 +109,10 @@ kubectl -n ray port-forward svc/llm-distributed-inferencing-head-svc 8265:8265
 | Variable | Default | Description |
 |---|---|---|
 | `MODEL` | `Qwen/Qwen2.5-7B-Instruct` | HuggingFace model ID |
-| `NUM_PROMPTS` | `50` | Number of prompts to benchmark |
-| `MAX_TOKENS` | `256` | Maximum tokens per response |
+| `NUM_PROMPTS` | `10` | Number of prompts to benchmark |
+| `MAX_TOKENS` | `64` | Maximum tokens per response |
 | `TENSOR_PARALLEL_SIZE` | `1` | Tensor parallelism degree for vLLM |
-| `CONCURRENCY` | `1` | Number of concurrent engine replicas |
+| `CONCURRENCY` | `2` | Number of concurrent engine replicas |
 
 These are set in `runtimeEnvYAML` inside `base/rayjob.yaml` and can be overridden there.
 
@@ -123,6 +123,6 @@ The default `base/rayjob.yaml` uses **2 GPU worker nodes with 1 GPU each** (2 to
 ## Cleanup
 
 ```bash
-kubectl -n ray delete rayjob llm-distributed-inferencing
-kubectl -n ray delete configmap llm-distributed-inferencing-scripts
+kubectl -n ray delete rayjob llm-inferencing
+kubectl -n ray delete configmap llm-inferencing-scripts
 ```

@@ -6,4 +6,4 @@ patches:
   - path: rayjob-patch.yaml
     target:
       kind: RayJob
-      name: llm-distributed-inferencing
+      name: llm-inferencing
