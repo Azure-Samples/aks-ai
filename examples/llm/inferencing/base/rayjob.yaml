@@ -8,8 +8,8 @@ spec:
   runtimeEnvYAML: |
     env_vars:
       MODEL: "Qwen/Qwen2.5-7B-Instruct"
-      NUM_PROMPTS: "10"
-      MAX_TOKENS: "64"
+      NUM_PROMPTS: "50"
+      MAX_TOKENS: "256"
       TENSOR_PARALLEL_SIZE: "1"
       CONCURRENCY: "2"
 
