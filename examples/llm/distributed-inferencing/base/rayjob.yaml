@@ -1,7 +1,7 @@
 apiVersion: ray.io/v1
 kind: RayJob
 metadata:
-  name: llm-inferencing
+  name: llm-distributed-inferencing
   namespace: ray
 spec:
   entrypoint: python /home/ray/scripts/main.py
@@ -61,7 +61,7 @@ spec:
           volumes:
             - name: scripts
               configMap:
-                name: llm-inferencing-scripts
+                name: llm-distributed-inferencing-scripts
                 items:
                   - key: main.py
                     path: main.py
@@ -96,7 +96,7 @@ spec:
             volumes:
               - name: scripts
                 configMap:
-                  name: llm-inferencing-scripts
+                  name: llm-distributed-inferencing-scripts
                   items:
                     - key: main.py
                       path: main.py

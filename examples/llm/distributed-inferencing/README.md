@@ -1,6 +1,6 @@
-# LLM Distributed Inference Benchmark on AKS with KubeRay
+# Distributed Inference Benchmark on AKS with KubeRay
 
-This example demonstrates **LLM inference benchmarking** on Kubernetes using [KubeRay](https://docs.ray.io/en/latest/cluster/kubernetes/index.html) and [Ray Data LLM](https://docs.ray.io/en/latest/data/api/doc/ray.data.llm.html) backed by [vLLM](https://docs.vllm.ai/). It supports both **Azure (AKS)** and **Nebius** clusters.
+This example demonstrates **distributed inference benchmarking** on Kubernetes using [KubeRay](https://docs.ray.io/en/latest/cluster/kubernetes/index.html) and [Ray Data LLM](https://docs.ray.io/en/latest/data/api/doc/ray.data.llm.html) backed by [vLLM](https://docs.vllm.ai/). It supports both **Azure (AKS)** and **Nebius** clusters.
 
 ## What This Example Does
 
@@ -21,7 +21,7 @@ This example demonstrates **LLM inference benchmarking** on Kubernetes using [Ku
 ## Directory Structure
 
 ```
-inferencing/
+distributed-inferencing/
 ├── Dockerfile                       # Builds the custom Ray + vLLM image
 ├── main.py                          # Benchmark script (runs on the RayCluster)
 ├── run.sh                           # One-command launcher (azure or nebius)
@@ -52,7 +52,7 @@ GPU allocation is defined in `base/gpu-claim.yaml` as a standalone [ResourceClai
         │
         ▼
 ┌──────────────────────────────────────────────────┐
-│ RayJob: llm-inferencing              │
+│ RayJob: llm-distributed-inferencing              │
 │                                                  │
 │  Head Pod (CPU node pool)                        │
 │  ├── main.py (entrypoint via ConfigMap)          │
@@ -82,7 +82,7 @@ Or apply manually:
 
 ```bash
 # Create the ConfigMap
-kubectl create configmap llm-inferencing-scripts \
+kubectl create configmap llm-distributed-inferencing-scripts \
     --from-file=main.py \
     -n ray --dry-run=client -o yaml | kubectl apply -f -
 
@@ -94,13 +94,13 @@ kubectl apply -k overlays/azure   # or overlays/nebius
 
 ```bash
 # Watch job status
-kubectl -n ray get rayjob llm-inferencing -w
+kubectl -n ray get rayjob llm-distributed-inferencing -w
 
 # Stream logs
-kubectl -n ray logs -f -l job-name=llm-inferencing --tail=200
+kubectl -n ray logs -f -l job-name=llm-distributed-inferencing --tail=200
 
 # Ray Dashboard
-kubectl -n ray port-forward svc/llm-inferencing-head-svc 8265:8265
+kubectl -n ray port-forward svc/llm-distributed-inferencing-head-svc 8265:8265
 ```
 
 ## Configuration
@@ -124,6 +124,6 @@ The default `base/rayjob.yaml` uses **2 GPU worker nodes with 1 GPU each** (2 to
 ## Cleanup
 
 ```bash
-kubectl -n ray delete rayjob llm-inferencing
-kubectl -n ray delete configmap llm-inferencing-scripts
+kubectl -n ray delete rayjob llm-distributed-inferencing
+kubectl -n ray delete configmap llm-distributed-inferencing-scripts
 ```

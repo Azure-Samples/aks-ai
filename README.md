@@ -21,7 +21,7 @@ Key infrastructure components:
 
 | Example | Description |
 |---|---|
-| [Distributed Inference](examples/llm/inferencing/) | Benchmark LLM inference throughput and latency using Ray Data LLM with vLLM. Default model: Qwen2.5-7B-Instruct. |
+| [Distributed Inference](examples/llm/distributed-inferencing/) | Benchmark LLM inference throughput and latency using Ray Data LLM with vLLM. Default model: Qwen2.5-7B-Instruct. |
 | [Fine-Tuning](examples/llm/fine-tuning/) | LoRA SFT on Qwen2.5-7B-Instruct using Ray Train and LLaMA-Factory for entity recognition on the Viggo dataset. |
 
 ### Multimodal
@@ -55,13 +55,13 @@ Each example follows a consistent layout:
 ## Getting Started
 
 1. Ensure your AKS cluster and prerequisites are configured.
-2. Navigate to the example you want to run (e.g., `examples/llm/inferencing/`).
+2. Navigate to the example you want to run (e.g., `examples/llm/distributed-inferencing/`).
 3. Review the example's README for specific configuration details.
 4. Run the example:
 
 ```bash
 # Example: LLM Inference on Azure
-./examples/llm/inferencing/run.sh azure
+./examples/llm/distributed-inferencing/run.sh azure
 ```
 
 Each example's `run.sh` script handles applying the Kustomize manifests and submitting the RayJob to the cluster.

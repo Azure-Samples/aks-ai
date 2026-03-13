@@ -1,7 +1,7 @@
 """
-LLM Inference Benchmark on RayCluster
-======================================
-Measures throughput and latency of LLM inference using ray.data.llm
+Distributed Inference Benchmark on RayCluster
+==============================================
+Measures throughput and latency of distributed inference using ray.data.llm
 (backed by vLLM) on a RayCluster managed by KubeRay on AKS.
 
 The script builds a Ray Data pipeline that preprocesses prompts into
@@ -123,7 +123,7 @@ def run_benchmark(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="LLM inference benchmark on RayCluster (ray.data.llm)"
+        description="Distributed inference benchmark on RayCluster (ray.data.llm)"
     )
     parser.add_argument(
         "--model",
