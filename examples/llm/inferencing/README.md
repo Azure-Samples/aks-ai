@@ -22,6 +22,7 @@ This example demonstrates **LLM inference benchmarking** on Kubernetes using [Ku
 
 ```
 inferencing/
+├── Dockerfile                       # Builds the custom Ray + vLLM image
 ├── main.py                          # Benchmark script (runs on the RayCluster)
 ├── run.sh                           # One-command launcher (azure or nebius)
 ├── base/
@@ -64,7 +65,7 @@ GPU allocation is defined in `base/gpu-claim.yaml` as a standalone [ResourceClai
 └──────────────────────────────────────────────────┘
 ```
 
-The script is mounted via a ConfigMap. Pip dependencies (`ray[llm]`, `vllm`) are installed on all nodes at job start via `runtimeEnvYAML` in `rayjob.yaml`. Workers mount an `emptyDir` volume at `/root/.cache/huggingface` for model weight caching.
+The script is mounted via a ConfigMap. All pods use a custom container image (`ghcr.io/azure-samples/aks-ai/llm-inferencing`) that has `ray[llm]` and `vllm` pre-installed (see `Dockerfile`). This avoids the pip-install delay that would occur with `runtimeEnvYAML`. Workers mount an `emptyDir` volume at `/root/.cache/huggingface` for model weight caching.
 
 ## Quick Start
 

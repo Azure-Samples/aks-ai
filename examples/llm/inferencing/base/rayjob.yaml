@@ -6,9 +6,6 @@ metadata:
 spec:
   entrypoint: python /home/ray/scripts/main.py
   runtimeEnvYAML: |
-    pip:
-      - "ray[llm]==2.53.0"
-      - "vllm>=0.12.0,<0.13.0"
     env_vars:
       MODEL: "Qwen/Qwen2.5-7B-Instruct"
       NUM_PROMPTS: "10"
@@ -23,7 +20,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: ray-job-submitter
-          image: rayproject/ray:2.53.0-py312
+          image: ghcr.io/azure-samples/aks-ai/llm-inferencing:latest
 
   rayClusterSpec:
     rayVersion: "2.53.0"
@@ -38,7 +35,7 @@ spec:
         spec:
           containers:
             - name: ray-head
-              image: rayproject/ray:2.53.0-py312
+              image: ghcr.io/azure-samples/aks-ai/llm-inferencing:latest
               env:
                 - name: RAY_DISABLE_DOCKER_CPU_WARNING
                   value: "1"
@@ -81,7 +78,7 @@ spec:
           spec:
             containers:
               - name: ray-worker
-                image: rayproject/ray:2.53.0-py312-gpu
+                image: ghcr.io/azure-samples/aks-ai/llm-inferencing:latest
                 resources:
                   limits:
                     cpu: "8"

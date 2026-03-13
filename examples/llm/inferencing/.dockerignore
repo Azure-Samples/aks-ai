@@ -1,0 +1,6 @@
+README.md
+*.yaml
+overlays/
+base/
+run.sh
+.dockerignore
