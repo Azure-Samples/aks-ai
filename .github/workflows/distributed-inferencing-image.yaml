@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - "examples/llm/inferencing/Dockerfile"
+      - "examples/llm/distributed-inferencing/Dockerfile"
   pull_request:
     branches: [main]
     paths:
-      - "examples/llm/inferencing/Dockerfile"
+      - "examples/llm/distributed-inferencing/Dockerfile"
   workflow_dispatch:
 
 env:
@@ -45,7 +45,7 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: examples/llm/inferencing
+          context: examples/llm/distributed-inferencing
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
