@@ -12,9 +12,9 @@ kubectl apply -f nebius/
 echo "⏳ Waiting for all sample app deployments to become ready..."
 
 kubectl rollout status deployment/azure-sample-cpu-app --timeout=3600s
-kubectl rollout status deployment/azure-sample-gpu-app --timeout=3600s
 kubectl rollout status deployment/nebius-sample-cpu-app --timeout=3600s
 kubectl rollout status deployment/nebius-sample-gpu-app --timeout=3600s
+kubectl rollout status deployment/azure-sample-gpu-app --timeout=3600s
 
 echo "✅ All deployments are ready!"
 

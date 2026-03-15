@@ -12,6 +12,10 @@ spec:
         group: karpenter.azure.com
         kind: AKSNodeClass
         name: azure
+      startupTaints:
+        - key: node.cilium.io/agent-not-ready
+          value: "true"
+          effect: NoSchedule
       requirements:
         - key: karpenter.sh/capacity-type
           operator: In
