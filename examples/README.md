@@ -1,0 +1,50 @@
+# KubeRay: Entity Recognition E2E
+
+## Prerequisites
+
+Set up PVC with blobfuse2:
+
+```bash
+kubectl apply -f configs/storageclass.yaml
+kubectl apply -f configs/pvc.yaml
+```
+
+## Entity Recognition E2E (Training + Batch Inference)
+
+### 1. Create the ConfigMap holding the job script
+
+```bash
+NAMESPACE=ray
+kubectl create configmap entity-recognition-scripts \
+  --from-file=entity_recognition.py \
+  -n $NAMESPACE \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+### 2. Submit the RayJob (creates its own transient cluster)
+
+```bash
+kubectl apply -f llm-rayjob.yaml
+```
+
+### 3. Wait for the job's pod to be running before streaming logs
+
+```bash
+kubectl wait --for=condition=Ready pod -l app.kubernetes.io/created-by=kuberay-operator -n $NAMESPACE --timeout=300s
+kubectl wait --for=condition=Ready pod -l job-name=llm -n $NAMESPACE --timeout=300s
+kubectl -n $NAMESPACE get pods -o wide
+```
+
+### 4. Watch progress
+
+```bash
+kubectl -n $NAMESPACE logs -f -l job-name=llm --tail=100
+```
+
+### 5. Clean up after inspection
+
+```bash
+kubectl -n $NAMESPACE delete rayjob llm
+```
+
+> **Note:** Replace `$NAMESPACE` with your target Kubernetes namespace.
